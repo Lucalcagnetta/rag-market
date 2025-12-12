@@ -1,0 +1,5 @@
+{
+  "name": "Ragnarok Market Tracker",
+  "description": "Automated price tracking dashboard for Ragnarok Latam (Freya Server). Scrapes prices, monitors changes, and provides real-time alerts.",
+  "requestFramePermissions": []
+}
