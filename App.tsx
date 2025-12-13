@@ -22,7 +22,8 @@ import {
   Zap,
   Clock,
   Volume2,
-  VolumeX
+  VolumeX,
+  RefreshCw
 } from 'lucide-react';
 
 const SYNC_INTERVAL_MS = 2000; // Sincroniza com servidor a cada 2s
@@ -283,6 +284,27 @@ const App: React.FC = () => {
     }
   };
 
+  const resetItem = (id: string) => {
+      // Força um reset visual e lógico no item
+      // nextUpdate: 0 força o servidor a pegar este item IMEDIATAMENTE no próximo tick
+      const newList = items.map(i => {
+          if (i.id === id) {
+              return { 
+                  ...i, 
+                  lastPrice: null, 
+                  lastUpdated: null, 
+                  status: Status.IDLE, 
+                  nextUpdate: 0,
+                  message: undefined,
+                  isAck: true // Evita som desnecessário durante o reset
+              };
+          }
+          return i;
+      });
+      setItems(newList);
+      saveData(newList, settings);
+  };
+
   const acknowledgeAll = () => {
     if (confirm("Marcar tudo como visto?")) {
       const newList = items.map(i => ({ ...i, isAck: true, hasPriceDrop: false }));
@@ -472,6 +494,7 @@ const App: React.FC = () => {
                        {isActiveEvent && (
                          <button onClick={() => acknowledgeItem(item.id)} className="bg-emerald-600 text-white p-2 rounded-full shadow-lg"><Eye size={16}/></button>
                        )}
+                       <button title="Forçar Atualização" onClick={() => resetItem(item.id)} className="text-slate-500 hover:text-emerald-400 p-2"><RefreshCw size={16}/></button>
                        <button onClick={() => { setEditingItem(item); setEditingTargetInput(formatMoney(item.targetPrice).replace('z','').trim()); }} className="text-slate-500 hover:text-blue-400 p-2"><Edit2 size={16}/></button>
                        <button onClick={() => removeItem(item.id)} className="text-slate-500 hover:text-red-400 p-2"><Trash2 size={16}/></button>
                     </div>
