@@ -186,7 +186,6 @@ app.post('/api/db', (req, res) => {
     if (!Array.isArray(items) || typeof settings !== 'object') {
       return res.status(400).json({ error: 'Formato inválido' });
     }
-    // Recebe atualizações do Frontend (ex: adicionar item, marcar visto)
     GLOBAL_DB.items = items;
     GLOBAL_DB.settings = settings;
     saveDB();
@@ -197,8 +196,6 @@ app.post('/api/db', (req, res) => {
   }
 });
 
-// Rota de Compatibilidade (Retroactive Fix)
-// Se algum cliente antigo tentar acessar /api/search, ele funciona em vez de dar erro 404/JSON
 app.get('/api/search', async (req, res) => {
     const { item } = req.query;
     const cookie = req.headers['x-ro-cookie'] || GLOBAL_DB.settings.cookie;
@@ -215,64 +212,94 @@ app.get('/api/health', (req, res) => {
 });
 
 // =======================================================
-// BACKGROUND AUTOMATION LOOP
+// BACKGROUND AUTOMATION LOOPS (DUAL WORKERS)
 // =======================================================
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; 
 const LOOP_TICK_MS = 2000; 
 
-const startAutomationLoop = () => {
-  console.log("🚀 Automação de Background Iniciada");
+// Função auxiliar para processar um item
+const processItem = async (item, workerName) => {
+  console.log(`[${workerName}] Verificando: ${item.name}`);
   
+  // 1. Marca imediatamente para ninguém mais pegar
+  item.status = 'LOADING';
+  saveDB(); 
+
+  // 2. Processa
+  const result = await performScrape(item.name, GLOBAL_DB.settings.cookie);
+  
+  const newPrice = result.price;
+  const oldPrice = item.lastPrice;
+  const isSuccess = result.success;
+
+  // Lógica de Negócio
+  const isDeal = isSuccess && newPrice !== null && newPrice > 0 && newPrice <= item.targetPrice;
+  const wasDeal = oldPrice !== null && oldPrice > 0 && oldPrice <= item.targetPrice;
+  
+  const isPriceDrop = isSuccess && 
+                      newPrice !== null && 
+                      oldPrice !== null && 
+                      newPrice > 0 && 
+                      oldPrice > 0 && 
+                      newPrice < oldPrice;
+
+  const shouldResetAck = isPriceDrop || (isDeal && !wasDeal);
+
+  // 3. Atualiza Objeto
+  item.lastPrice = newPrice;
+  item.lastUpdated = new Date().toISOString();
+  item.status = isSuccess ? (newPrice === 0 ? 'ALERTA' : 'OK') : 'ERRO';
+  // Adiciona tag do worker no erro para diagnóstico
+  item.message = result.error ? `[${workerName}] ${result.error}` : undefined;
+  item.nextUpdate = isSuccess ? (Date.now() + UPDATE_INTERVAL_MS) : (Date.now() + 60000);
+  
+  if (shouldResetAck) {
+     item.isAck = false;
+     if (isPriceDrop) item.hasPriceDrop = true;
+     console.log(`✨ [${workerName}] ALERTA: ${item.name} caiu/oferta!`);
+  }
+
+  saveDB();
+};
+
+const startAutomationLoop = () => {
+  console.log("🚀 Automação de Background Iniciada (Modo Dual: TOP & BOT)");
+  
+  // WORKER 1: Cima para Baixo (TOP)
   setInterval(async () => {
     if (!GLOBAL_DB.settings?.isRunning) return;
-
     const h = new Date().getHours();
-    const isNight = h >= 1 && h < 8;
-    if (isNight) return;
+    if (h >= 1 && h < 8) return;
 
     const now = Date.now();
     const candidates = GLOBAL_DB.items.filter(i => i.nextUpdate <= now && i.status !== 'LOADING');
 
     if (candidates.length > 0) {
+      // Pega o PRIMEIRO da fila
       const item = candidates[0];
-      console.log(`[AUTO] Verificando: ${item.name}`);
-      
-      item.status = 'LOADING';
-      saveDB(); 
-
-      const result = await performScrape(item.name, GLOBAL_DB.settings.cookie);
-      
-      const newPrice = result.price;
-      const oldPrice = item.lastPrice;
-      const isSuccess = result.success;
-
-      const isDeal = isSuccess && newPrice !== null && newPrice > 0 && newPrice <= item.targetPrice;
-      const wasDeal = oldPrice !== null && oldPrice > 0 && oldPrice <= item.targetPrice;
-      
-      const isPriceDrop = isSuccess && 
-                          newPrice !== null && 
-                          oldPrice !== null && 
-                          newPrice > 0 && 
-                          oldPrice > 0 && 
-                          newPrice < oldPrice;
-
-      const shouldResetAck = isPriceDrop || (isDeal && !wasDeal);
-
-      item.lastPrice = newPrice;
-      item.lastUpdated = new Date().toISOString();
-      item.status = isSuccess ? (newPrice === 0 ? 'ALERTA' : 'OK') : 'ERRO';
-      item.message = result.error || undefined;
-      item.nextUpdate = isSuccess ? (Date.now() + UPDATE_INTERVAL_MS) : (Date.now() + 60000);
-      
-      if (shouldResetAck) {
-         item.isAck = false;
-         if (isPriceDrop) item.hasPriceDrop = true;
-         console.log(`✨ ALERTA: ${item.name} caiu/oferta!`);
-      }
-
-      saveDB();
+      await processItem(item, "TOP");
     }
   }, LOOP_TICK_MS);
+
+  // WORKER 2: Baixo para Cima (BOT)
+  // Pequeno delay inicial para desencontrar os logs
+  setTimeout(() => {
+    setInterval(async () => {
+      if (!GLOBAL_DB.settings?.isRunning) return;
+      const h = new Date().getHours();
+      if (h >= 1 && h < 8) return;
+
+      const now = Date.now();
+      // Refiltra (pois o Worker 1 pode ter pego algo milissegundos antes)
+      const candidates = GLOBAL_DB.items.filter(i => i.nextUpdate <= now && i.status !== 'LOADING');
+
+      if (candidates.length > 0) {
+        // Pega o ÚLTIMO da fila
+        const item = candidates[candidates.length - 1];
+        await processItem(item, "BOT");
+      }
+    }, LOOP_TICK_MS);
+  }, 1000); 
 };
 
 startAutomationLoop();
@@ -281,7 +308,7 @@ app.get('*', (req, res) => {
   if (fs.existsSync(join(distPath, 'index.html'))) {
     res.sendFile(join(distPath, 'index.html'));
   } else {
-    res.send('Backend Server Online. Automation Running.');
+    res.send('Backend Server Online. Dual Workers Running.');
   }
 });
 
