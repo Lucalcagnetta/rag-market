@@ -22,10 +22,17 @@ export const fetchPrice = async (
   }
 
   try {
+    // Adiciona Timeout de 15s no cliente também para evitar travamento de UI
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 15000);
+
     const response = await fetch(apiUrl, {
       method: 'GET',
       headers: headers,
+      signal: controller.signal
     });
+    
+    clearTimeout(id);
 
     if (!response.ok) {
       return { success: false, price: null, error: `Erro HTTP: ${response.status}` };
@@ -38,7 +45,7 @@ export const fetchPrice = async (
     return {
       success: false,
       price: null,
-      error: `Erro de Conexão: ${err.message}`
+      error: `Erro de Conexão: ${err.name === 'AbortError' ? 'Timeout (15s)' : err.message}`
     };
   }
 };

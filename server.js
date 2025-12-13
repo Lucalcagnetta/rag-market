@@ -122,7 +122,7 @@ app.get('/api/search', async (req, res) => {
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s timeout (Aumentado para segurança)
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout (Reduzido para agilidade)
 
     const response = await fetch(targetUrl, { 
       method: 'GET', 
@@ -227,16 +227,4 @@ app.get('/api/search', async (req, res) => {
     console.error(`[ERRO CRÍTICO] ${item}:`, error.message);
     return res.json({ success: false, price: null, error: error.toString() });
   }
-});
-
-app.get('*', (req, res) => {
-  if (fs.existsSync(join(distPath, 'index.html'))) {
-    res.sendFile(join(distPath, 'index.html'));
-  } else {
-    res.send('Backend Online. Frontend not built. Run "npm run build"');
-  }
-});
-
-app.listen(PORT, HOST, () => {
-  console.log(`Ragnarok Scraper rodando em http://${HOST}:${PORT}`);
 });
