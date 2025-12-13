@@ -46,8 +46,9 @@ const playAlertSound = () => {
 };
 
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; // 2 Minutes
-const SAFETY_DELAY_MS = 2500; // Reduzido para 2.5s para agilizar a fila
+const SAFETY_DELAY_MS = 2000; // Delay entre lotes
 const BATCH_SIZE = 2; // Processa 2 itens por vez
+const WATCHDOG_TIMEOUT_MS = 30000; // 30s para considerar travado e resetar
 
 const App: React.FC = () => {
   // -- State --
@@ -78,8 +79,12 @@ const App: React.FC = () => {
   const isRunningRef = useRef(isRunning);
   const itemsRef = useRef(items);
   const settingsRef = useRef(settings);
+  
+  // Controle de concorrência e Watchdog
   const processingRef = useRef(false);
+  const processingStartTimeRef = useRef<number>(0);
   const lastFetchTimeRef = useRef<number>(0);
+  
   const saveTimeoutRef = useRef<number | null>(null);
 
   // Sync refs with state
@@ -198,7 +203,14 @@ const App: React.FC = () => {
         return;
       }
 
-      if (processingRef.current) return;
+      // WATCHDOG: Se estiver processando há muito tempo, destrava
+      if (processingRef.current) {
+        if (Date.now() - processingStartTimeRef.current > WATCHDOG_TIMEOUT_MS) {
+           console.warn("⚠️ Watchdog: Processamento travado detectado. Reiniciando fila.");
+           processingRef.current = false;
+        }
+        return;
+      }
 
       const now = Date.now();
       if (now - lastFetchTimeRef.current < SAFETY_DELAY_MS) {
@@ -215,6 +227,7 @@ const App: React.FC = () => {
 
       if (candidates.length > 0) {
         processingRef.current = true;
+        processingStartTimeRef.current = Date.now();
         
         // Marca todos como LOADING
         const candidateIds = candidates.map(c => c.id);
@@ -261,13 +274,18 @@ const App: React.FC = () => {
 
               const shouldAlert = isDeal || isPriceDrop;
 
+              // Calcula próximo update. Se deu erro, tenta mais cedo (30s) senão intervalo normal
+              const nextTime = isSuccess 
+                 ? Date.now() + UPDATE_INTERVAL_MS 
+                 : Date.now() + 30000; 
+
               return {
                 ...i,
                 lastPrice: newPrice,
                 lastUpdated: new Date().toISOString(),
                 status: isSuccess ? (newPrice === 0 ? Status.ALERTA : Status.OK) : Status.ERRO,
                 message: result.error || undefined,
-                nextUpdate: Date.now() + UPDATE_INTERVAL_MS,
+                nextUpdate: nextTime,
                 isAck: shouldAlert ? false : i.isAck,
                 hasPriceDrop: isPriceDrop ? true : (isSuccess ? false : i.hasPriceDrop)
               };
@@ -279,8 +297,9 @@ const App: React.FC = () => {
           });
 
         } catch (e) {
-          console.error(e);
-          setItems(prev => prev.map(i => candidateIds.includes(i.id) ? { ...i, status: Status.ERRO, nextUpdate: Date.now() + UPDATE_INTERVAL_MS } : i));
+          console.error("Erro no lote:", e);
+          // Em caso de falha catastrófica no Promise.all, libera todos do lote
+          setItems(prev => prev.map(i => candidateIds.includes(i.id) ? { ...i, status: Status.ERRO, nextUpdate: Date.now() + 60000 } : i));
         } finally {
           processingRef.current = false;
         }
