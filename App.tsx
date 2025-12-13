@@ -20,7 +20,9 @@ import {
   TrendingDown,
   ListChecks,
   Zap,
-  Clock
+  Clock,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 
 const SYNC_INTERVAL_MS = 2000; // Sincroniza com servidor a cada 2s
@@ -61,6 +63,33 @@ const App: React.FC = () => {
     } catch (e) { console.error(e); }
   }, []);
 
+  // Unlock Audio on First Interaction (Corrige problema de som não sair em dispositivos passivos)
+  useEffect(() => {
+    const handleInteraction = () => {
+        if (!audioCtxRef.current) {
+            audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        }
+        if (audioCtxRef.current.state === 'suspended') {
+            audioCtxRef.current.resume().then(() => {
+                // Remove listeners após desbloquear com sucesso
+                ['click', 'touchstart', 'keydown'].forEach(evt => 
+                    window.removeEventListener(evt, handleInteraction)
+                );
+            }).catch(console.error);
+        }
+    };
+
+    ['click', 'touchstart', 'keydown'].forEach(evt => 
+        window.addEventListener(evt, handleInteraction)
+    );
+
+    return () => {
+        ['click', 'touchstart', 'keydown'].forEach(evt => 
+            window.removeEventListener(evt, handleInteraction)
+        );
+    };
+  }, []);
+
   const playSound = useCallback((type: 'deal' | 'drop') => {
     try {
       if (!audioCtxRef.current) initAudio();
@@ -70,15 +99,24 @@ const App: React.FC = () => {
       
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
+
+      // FORÇA ESTÉREO (L+R)
+      // Garante que o som saia nos dois lados mesmo se o dispositivo tratar mono de forma estranha
+      const merger = ctx.createChannelMerger(2);
+      
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      // Conecta o ganho (mono) nas duas entradas do merger (Esquerda e Direita)
+      gain.connect(merger, 0, 0); 
+      gain.connect(merger, 0, 1);
+      
+      merger.connect(ctx.destination);
 
       if (type === 'deal') {
         osc.type = 'square';
         osc.frequency.setValueAtTime(523.25, now);
         osc.frequency.setValueAtTime(1046.50, now + 0.15);
         
-        // VOLUME AUMENTADO (De 0.05 para 0.3)
+        // VOLUME AUMENTADO (0.3)
         gain.gain.setValueAtTime(0.3, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
         
@@ -89,7 +127,7 @@ const App: React.FC = () => {
         osc.frequency.setValueAtTime(880, now);
         osc.frequency.exponentialRampToValueAtTime(440, now + 0.3);
         
-        // VOLUME AUMENTADO (De 0.1 para 0.4)
+        // VOLUME AUMENTADO (0.4)
         gain.gain.setValueAtTime(0.4, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
         
