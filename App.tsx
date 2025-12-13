@@ -112,23 +112,25 @@ const App: React.FC = () => {
       merger.connect(ctx.destination);
 
       if (type === 'deal') {
+        // SOM VERDE (SQUARE - Estridente)
         osc.type = 'square';
         osc.frequency.setValueAtTime(523.25, now);
         osc.frequency.setValueAtTime(1046.50, now + 0.15);
         
-        // VOLUME AUMENTADO (0.3)
+        // VOLUME 0.3
         gain.gain.setValueAtTime(0.3, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
         
         osc.start(now);
         osc.stop(now + 0.6);
       } else {
-        osc.type = 'sine';
+        // SOM AZUL (TRIANGLE - Mais cheio e alto que sine)
+        osc.type = 'triangle';
         osc.frequency.setValueAtTime(880, now);
         osc.frequency.exponentialRampToValueAtTime(440, now + 0.3);
         
-        // VOLUME AUMENTADO (0.4)
-        gain.gain.setValueAtTime(0.4, now);
+        // VOLUME IGUALADO AO VERDE (0.3)
+        gain.gain.setValueAtTime(0.3, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
         
         osc.start(now);
