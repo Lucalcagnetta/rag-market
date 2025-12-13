@@ -30,8 +30,6 @@ if (!fs.existsSync(DB_FILE)) {
 }
 
 // --- STATE MANAGEMENT (IN-MEMORY with FLUSH) ---
-// Para evitar race conditions de leitura/escrita de arquivo,
-// mantemos o estado na memória do Node e salvamos periodicamente.
 let GLOBAL_DB = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
 
 // Função para persistir no disco
@@ -42,6 +40,29 @@ const saveDB = () => {
     console.error("Erro ao salvar DB em disco:", e);
   }
 };
+
+// --- LIMPEZA DE INICIALIZAÇÃO ---
+// Corrige itens que ficaram presos com erros de JSON ou travados
+const cleanStartupData = () => {
+  let changed = false;
+  GLOBAL_DB.items = GLOBAL_DB.items.map(item => {
+    // Se tiver aquele erro de JSON específico, reseta
+    if (item.status === 'ERRO' && item.message && item.message.includes('Unexpected token')) {
+      console.log(`[FIX] Resetando item travado: ${item.name}`);
+      changed = true;
+      return { ...item, status: 'IDLE', nextUpdate: 0, message: undefined };
+    }
+    // Se ficou travado em LOADING por desligamento incorreto
+    if (item.status === 'LOADING') {
+      changed = true;
+      return { ...item, status: 'IDLE', nextUpdate: 0 };
+    }
+    return item;
+  });
+
+  if (changed) saveDB();
+};
+cleanStartupData();
 
 app.use(cors());
 app.use(express.json());
@@ -60,40 +81,6 @@ if (fs.existsSync(distPath)) {
 }
 
 // =======================================================
-// ROTAS DE API
-// =======================================================
-
-// Ler dados (Retorna da Memória)
-app.get('/api/db', (req, res) => {
-  res.json(GLOBAL_DB);
-});
-
-// Salvar dados (Atualiza Memória e Disco)
-app.post('/api/db', (req, res) => {
-  try {
-    const { items, settings } = req.body;
-    if (!Array.isArray(items) || typeof settings !== 'object') {
-      return res.status(400).json({ error: 'Formato inválido' });
-    }
-    
-    // Atualiza estado global
-    GLOBAL_DB.items = items;
-    GLOBAL_DB.settings = settings;
-    
-    saveDB(); // Persiste
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Erro ao salvar DB:', error);
-    res.status(500).json({ error: 'Erro ao salvar dados' });
-  }
-});
-
-// Health Check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'online', time: new Date().toISOString() });
-});
-
-// =======================================================
 // LÓGICA DE SCRAPING (CORE)
 // =======================================================
 
@@ -103,7 +90,7 @@ const parsePriceString = (str) => {
   return parseInt(numericStr, 10);
 };
 
-// Função Interna de Scraping (Não exposta via rota, usada pelo loop)
+// Função Interna de Scraping
 const performScrape = async (item, cookie) => {
   let userCookie = cookie || ''; 
   if (userCookie) userCookie = userCookie.replace(/[\r\n]+/g, '').trim();
@@ -138,12 +125,10 @@ const performScrape = async (item, cookie) => {
 
     const htmlText = await response.text();
 
-    // Verificações de Login
     if (htmlText.includes('member/login') || htmlText.includes('signin-form')) {
         return { success: false, price: null, error: 'Precisa de novo Cookie' };
     }
 
-    // Lógica de Extração de Preço
     const method1Regex = />\s*([0-9]{1,3}(?:[.,\s]?[0-9]{3})*)\s*z\s*</i;
     const match1 = htmlText.match(method1Regex);
 
@@ -154,7 +139,6 @@ const performScrape = async (item, cookie) => {
         }
     }
 
-    // Fallback search
     const method2Regex = />\s*([0-9,\.\s]+)\s*(?:z|Zeny)?\s*</gi;
     const matches2 = [...htmlText.matchAll(method2Regex)];
     let minPrice = Infinity;
@@ -178,7 +162,7 @@ const performScrape = async (item, cookie) => {
     }
 
     if (htmlText.includes('não foram encontrados') || htmlText.includes('No results') || htmlText.includes('list-none')) {
-        return { success: true, price: 0 }; // 0 significa sem estoque
+        return { success: true, price: 0 };
     }
     
     return { success: false, price: null, error: 'Preço ñ encontrado' };
@@ -189,48 +173,79 @@ const performScrape = async (item, cookie) => {
 };
 
 // =======================================================
-// BACKGROUND AUTOMATION LOOP (O CÉREBRO)
+// ROTAS DE API
 // =======================================================
-const UPDATE_INTERVAL_MS = 2 * 60 * 1000; // 2 minutos entre updates por item
-const LOOP_TICK_MS = 2000; // O loop roda a cada 2 segundos procurando trabalho
+
+app.get('/api/db', (req, res) => {
+  res.json(GLOBAL_DB);
+});
+
+app.post('/api/db', (req, res) => {
+  try {
+    const { items, settings } = req.body;
+    if (!Array.isArray(items) || typeof settings !== 'object') {
+      return res.status(400).json({ error: 'Formato inválido' });
+    }
+    // Recebe atualizações do Frontend (ex: adicionar item, marcar visto)
+    GLOBAL_DB.items = items;
+    GLOBAL_DB.settings = settings;
+    saveDB();
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erro ao salvar DB:', error);
+    res.status(500).json({ error: 'Erro ao salvar dados' });
+  }
+});
+
+// Rota de Compatibilidade (Retroactive Fix)
+// Se algum cliente antigo tentar acessar /api/search, ele funciona em vez de dar erro 404/JSON
+app.get('/api/search', async (req, res) => {
+    const { item } = req.query;
+    const cookie = req.headers['x-ro-cookie'] || GLOBAL_DB.settings.cookie;
+    
+    if (!item) return res.status(400).json({ success: false, error: 'Item missing' });
+    
+    console.log(`[LEGACY] Cliente antigo pediu busca manual para: ${item}`);
+    const result = await performScrape(item.toString(), cookie);
+    res.json(result);
+});
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'online', time: new Date().toISOString() });
+});
+
+// =======================================================
+// BACKGROUND AUTOMATION LOOP
+// =======================================================
+const UPDATE_INTERVAL_MS = 2 * 60 * 1000; 
+const LOOP_TICK_MS = 2000; 
 
 const startAutomationLoop = () => {
   console.log("🚀 Automação de Background Iniciada");
   
   setInterval(async () => {
-    // 1. Verifica se está ligado
     if (!GLOBAL_DB.settings?.isRunning) return;
 
-    // 2. Verifica Pausa Noturna (01h - 08h)
     const h = new Date().getHours();
     const isNight = h >= 1 && h < 8;
-    // (Poderíamos adicionar override aqui, mas vamos manter simples por enquanto)
     if (isNight) return;
 
-    // 3. Encontra items para atualizar
     const now = Date.now();
     const candidates = GLOBAL_DB.items.filter(i => i.nextUpdate <= now && i.status !== 'LOADING');
 
-    // Processa apenas 1 por vez para não sobrecarregar
     if (candidates.length > 0) {
       const item = candidates[0];
-      
       console.log(`[AUTO] Verificando: ${item.name}`);
       
-      // Marca como Loading
       item.status = 'LOADING';
-      // Salva estado intermediário (opcional, mas bom para UI ver que está rodando)
       saveDB(); 
 
-      // Scrape
       const result = await performScrape(item.name, GLOBAL_DB.settings.cookie);
       
-      // Atualiza Item
       const newPrice = result.price;
       const oldPrice = item.lastPrice;
       const isSuccess = result.success;
 
-      // Lógica de Negócio (Deal/Drop)
       const isDeal = isSuccess && newPrice !== null && newPrice > 0 && newPrice <= item.targetPrice;
       const wasDeal = oldPrice !== null && oldPrice > 0 && oldPrice <= item.targetPrice;
       
@@ -243,12 +258,10 @@ const startAutomationLoop = () => {
 
       const shouldResetAck = isPriceDrop || (isDeal && !wasDeal);
 
-      // Atualiza campos
       item.lastPrice = newPrice;
       item.lastUpdated = new Date().toISOString();
       item.status = isSuccess ? (newPrice === 0 ? 'ALERTA' : 'OK') : 'ERRO';
       item.message = result.error || undefined;
-      // Define próximo update (Sucesso: 2m, Erro: 1m)
       item.nextUpdate = isSuccess ? (Date.now() + UPDATE_INTERVAL_MS) : (Date.now() + 60000);
       
       if (shouldResetAck) {
@@ -257,17 +270,13 @@ const startAutomationLoop = () => {
          console.log(`✨ ALERTA: ${item.name} caiu/oferta!`);
       }
 
-      // Salva resultado final
       saveDB();
     }
-
   }, LOOP_TICK_MS);
 };
 
-// Inicia o loop
 startAutomationLoop();
 
-// Fallback Route
 app.get('*', (req, res) => {
   if (fs.existsSync(join(distPath, 'index.html'))) {
     res.sendFile(join(distPath, 'index.html'));
