@@ -22,70 +22,6 @@ import {
   ListChecks
 } from 'lucide-react';
 
-// -- SOUNDS --
-
-// Som 1: Preço caiu (mas não bateu o alvo) - Beep simples descendente
-const playPriceDropSound = () => {
-  try {
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const oscillator = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
-    
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.destination);
-    
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(880, audioContext.currentTime); 
-    oscillator.frequency.exponentialRampToValueAtTime(440, audioContext.currentTime + 0.3);
-    
-    gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.3);
-    
-    oscillator.start();
-    oscillator.stop(audioContext.currentTime + 0.3);
-  } catch (e) {
-    console.error("Audio play failed", e);
-  }
-};
-
-// Som 2: OFERTA! (Preço <= Alvo) - Som duplo vitorioso (Ding-Ding)
-const playDealSound = () => {
-  try {
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    
-    const now = audioContext.currentTime;
-
-    // Nota 1 (Aguda)
-    const osc1 = audioContext.createOscillator();
-    const gain1 = audioContext.createGain();
-    osc1.connect(gain1);
-    gain1.connect(audioContext.destination);
-    
-    osc1.type = 'square'; // Timbre mais "digital" e chamativo
-    osc1.frequency.setValueAtTime(523.25, now); // C5
-    gain1.gain.setValueAtTime(0.05, now);
-    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-    osc1.start(now);
-    osc1.stop(now + 0.1);
-
-    // Nota 2 (Mais aguda ainda)
-    const osc2 = audioContext.createOscillator();
-    const gain2 = audioContext.createGain();
-    osc2.connect(gain2);
-    gain2.connect(audioContext.destination);
-    
-    osc2.type = 'square';
-    osc2.frequency.setValueAtTime(1046.50, now + 0.15); // C6
-    gain2.gain.setValueAtTime(0.05, now + 0.15);
-    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
-    osc2.start(now + 0.15);
-    osc2.stop(now + 0.6);
-
-  } catch (e) {
-    console.error("Audio play failed", e);
-  }
-};
-
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; // 2 Minutes
 const SAFETY_DELAY_MS = 2000; // 2s de delay entre lotes
 const BATCH_SIZE = 2; // Processa 2 por vez
@@ -113,6 +49,11 @@ const App: React.FC = () => {
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [editingTargetInput, setEditingTargetInput] = useState<string>('');
 
+  // -- AUDIO CONTEXT REF (Global para o componente) --
+  // Navegadores bloqueiam audioContext se não for iniciado por clique.
+  // Usamos um Ref para manter o contexto vivo e destravado.
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
   // -- Refs for loop control --
   const isRunningRef = useRef(isRunning);
   const itemsRef = useRef(items);
@@ -128,6 +69,91 @@ const App: React.FC = () => {
   // Sync refs with state
   useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
   
+  // -- AUDIO HELPERS --
+
+  // Inicializa/Destrava o áudio (Deve ser chamado em cliques de botões)
+  const initAudio = useCallback(() => {
+    try {
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      if (audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume().then(() => {
+           console.log("Audio Context Resumed/Unlocked");
+        });
+      }
+    } catch (e) {
+      console.error("Erro ao iniciar AudioContext", e);
+    }
+  }, []);
+
+  // Som 1: Preço caiu (Beep)
+  const playPriceDropSound = useCallback(() => {
+    try {
+      if (!audioCtxRef.current) initAudio(); // Tenta iniciar se não existir
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(880, ctx.currentTime); 
+      oscillator.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.3);
+      
+      gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      
+      oscillator.start();
+      oscillator.stop(ctx.currentTime + 0.3);
+    } catch (e) {
+      console.error("Audio play failed", e);
+    }
+  }, [initAudio]);
+
+  // Som 2: OFERTA! (Ding-Ding)
+  const playDealSound = useCallback(() => {
+    try {
+      if (!audioCtxRef.current) initAudio();
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+      
+      const now = ctx.currentTime;
+
+      // Nota 1 (Aguda)
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      
+      osc1.type = 'square';
+      osc1.frequency.setValueAtTime(523.25, now); // C5
+      gain1.gain.setValueAtTime(0.05, now);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+      osc1.start(now);
+      osc1.stop(now + 0.1);
+
+      // Nota 2 (Mais aguda ainda)
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      
+      osc2.type = 'square';
+      osc2.frequency.setValueAtTime(1046.50, now + 0.15); // C6
+      gain2.gain.setValueAtTime(0.05, now + 0.15);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+      osc2.start(now + 0.15);
+      osc2.stop(now + 0.6);
+
+    } catch (e) {
+      console.error("Audio play failed", e);
+    }
+  }, [initAudio]);
+
   // -- DATA PERSISTENCE --
   useEffect(() => {
     const loadFromServer = async () => {
@@ -136,8 +162,17 @@ const App: React.FC = () => {
         if (res.ok) {
           const data = await res.json();
           if (data.items && Array.isArray(data.items)) {
-            setItems(data.items);
-            itemsRef.current = data.items;
+            // -- MIGRAÇÃO DE DADOS --
+            // Corrige itens antigos onde o usuário digitou "15" querendo dizer "15kk"
+            const fixedItems = data.items.map((i: Item) => {
+               if (i.targetPrice > 0 && i.targetPrice < 1000) {
+                 return { ...i, targetPrice: i.targetPrice * 1000000 };
+               }
+               return i;
+            });
+            
+            setItems(fixedItems);
+            itemsRef.current = fixedItems;
           }
           if (data.settings) {
             setSettings(data.settings);
@@ -204,26 +239,24 @@ const App: React.FC = () => {
       }
 
       // 2. Itens Interessantes (Ofertas ou Quedas) - Já vistos
-      // O usuário quer: "que ficou mais barato do que estava ao topo"
-      const aInteresting = aIsDeal || aHasDrop;
-      const bInteresting = bIsDeal || bHasDrop;
+      if (aIsDeal || aHasDrop || bIsDeal || bHasDrop) {
+          const aInteresting = aIsDeal || aHasDrop;
+          const bInteresting = bIsDeal || bHasDrop;
 
-      if (aInteresting && !bInteresting) return -1;
-      if (!aInteresting && bInteresting) return 1;
+          if (aInteresting && !bInteresting) return -1;
+          if (!aInteresting && bInteresting) return 1;
 
-      if (aInteresting && bInteresting) {
-          // Entre dois interessantes, prioriza OFERTA (abaixo do alvo)
+          // Entre dois interessantes, prioriza OFERTA
           if (aIsDeal && !bIsDeal) return -1;
           if (!aIsDeal && bIsDeal) return 1;
 
-          // Se forem iguais (ambos ofertas ou ambos drops), o mais recente primeiro
+          // Se iguais, mais recente primeiro
           const timeA = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
           const timeB = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
           return timeB - timeA;
       }
 
-      // 3. Itens Normais (Sem novidade, preço igual ou subiu)
-      // Ordena por Nome para manter a lista estável e não pular itens inúteis pro topo
+      // 3. Itens Normais (Ordena por Nome)
       return a.name.localeCompare(b.name);
     });
   }, []);
@@ -236,7 +269,6 @@ const App: React.FC = () => {
         return;
       }
 
-      // Pausa noturna
       const currentHour = new Date().getHours();
       const isSleepTime = currentHour >= 1 && currentHour < 8;
       setIsNightPause(isSleepTime);
@@ -295,7 +327,6 @@ const App: React.FC = () => {
               
               const isDeal = isSuccess && newPrice !== null && newPrice > 0 && newPrice <= i.targetPrice;
               
-              // Verifica se houve queda (Drop)
               const isPriceDrop = isSuccess && 
                                   newPrice !== null && 
                                   oldPrice !== null && 
@@ -343,23 +374,20 @@ const App: React.FC = () => {
     }, 1000);
 
     return () => clearInterval(intervalId);
-  }, []);
+  }, [playDealSound, playPriceDropSound]);
 
   // -- Handlers --
   const toggleAutomation = () => {
+    initAudio(); // Destrava o áudio ao clicar
     setIsRunning(!isRunning);
   };
 
   const handleSaveSettings = () => {
+    initAudio(); // Destrava o áudio ao salvar
     setSettings(tempSettings);
   };
 
-  // Helper Inteligente:
-  // "30" -> 30kk
-  // "350" -> 350kk
-  // "1500" -> 1.500 (Valor literal, pois >= 1000)
-  // "1k" -> 1.000
-  // "30z" -> 30 (Força valor baixo)
+  // Helper Inteligente: "30" -> 30kk
   const parseKkInput = (val: string): number => {
     if (!val) return 0;
     let numStr = val.toLowerCase().replace(/\s/g, '').replace(',', '.');
@@ -373,14 +401,12 @@ const App: React.FC = () => {
       multiplier = 1000;
       numStr = numStr.replace('k', '');
     } else if (numStr.includes('z')) {
-      // Sufixo 'z' força o valor literal (ex: 500z = 500)
       multiplier = 1;
       numStr = numStr.replace('z', '');
     } else {
       // SEM SUFIXO: Heurística Automática
       const tempNum = parseFloat(numStr);
       if (!isNaN(tempNum) && tempNum < 1000 && tempNum > 0) {
-        // Se for menor que 1000, assume Milhões (kk)
         multiplier = 1000000;
       }
     }
@@ -403,6 +429,7 @@ const App: React.FC = () => {
   };
 
   const addNewItem = () => {
+    initAudio(); // Garante audio
     if (!newItemName.trim()) return;
     const target = parseKkInput(newItemTarget) || 1000000;
 
@@ -430,10 +457,12 @@ const App: React.FC = () => {
 
   const handleEditClick = (item: Item) => {
     setEditingItem({ ...item });
+    // Carrega o input com o formato "30kk"
     setEditingTargetInput(formatMoney(item.targetPrice).replace('z', '').trim());
   };
 
   const saveEdit = () => {
+    initAudio(); // Garante audio
     if (!editingItem) return;
     setItems(prev => prev.map(i => i.id === editingItem.id ? editingItem : i));
     setEditingItem(null);
@@ -506,6 +535,7 @@ const App: React.FC = () => {
                   value={editingTargetInput}
                   onChange={(e) => {
                      setEditingTargetInput(e.target.value);
+                     // LÓGICA INTELIGENTE APLICADA AQUI TAMBÉM
                      const val = parseKkInput(e.target.value);
                      setEditingItem({...editingItem, targetPrice: val});
                   }}
@@ -684,15 +714,18 @@ const App: React.FC = () => {
               // Animação persistente se o evento for ativo
               let rowClass = "hover:bg-[#1c2128] border-l-transparent bg-[#161b22]";
               
-              if (isActiveEvent) {
-                 if (isDeal) {
-                    rowClass = "animate-pulse-green border-l-emerald-500 bg-emerald-900/10";
-                 } else if (item.hasPriceDrop) {
-                    rowClass = "animate-pulse-blue border-l-blue-500 bg-blue-900/10";
+              if (isDeal) {
+                 // DEAL: Se é oferta (abaixo do preço), a linha é VERDE
+                 if (isActiveEvent) {
+                     // Novo (Piscando)
+                     rowClass = "animate-pulse-green border-l-emerald-500 bg-emerald-900/20";
+                 } else {
+                     // Visto (Estático)
+                     rowClass = "border-l-emerald-600 bg-emerald-900/10 hover:bg-emerald-900/20";
                  }
-              } else if (isDeal) {
-                  // Deal já visto
-                  rowClass = "border-l-emerald-700 bg-[#161b22]"; 
+              } else if (isActiveEvent && item.hasPriceDrop) {
+                 // DROP: Apenas caiu, mas não é deal (AZUL)
+                 rowClass = "animate-pulse-blue border-l-blue-500 bg-blue-900/20";
               }
 
               return (
