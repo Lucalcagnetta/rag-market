@@ -19,7 +19,8 @@ import {
   Moon,
   Sun,
   TrendingDown,
-  ListChecks
+  ListChecks,
+  Zap
 } from 'lucide-react';
 
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; // 2 Minutes
@@ -40,6 +41,9 @@ const App: React.FC = () => {
   const [isRunning, setIsRunning] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [isNightPause, setIsNightPause] = useState(false);
+  
+  // Novo estado: Permite rodar manualmente mesmo de noite
+  const [overrideNightMode, setOverrideNightMode] = useState(false);
 
   // Inputs for New Item
   const [newItemName, setNewItemName] = useState('');
@@ -58,6 +62,7 @@ const App: React.FC = () => {
   const isRunningRef = useRef(isRunning);
   const itemsRef = useRef(items);
   const settingsRef = useRef(settings);
+  const overrideNightModeRef = useRef(overrideNightMode);
   
   // Controle de concorrência e Watchdog
   const processingRef = useRef(false);
@@ -68,6 +73,7 @@ const App: React.FC = () => {
 
   // Sync refs with state
   useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
+  useEffect(() => { overrideNightModeRef.current = overrideNightMode; }, [overrideNightMode]);
   
   // -- AUDIO HELPERS --
 
@@ -262,6 +268,7 @@ const App: React.FC = () => {
   // -- Automation Loop --
   useEffect(() => {
     const intervalId = setInterval(async () => {
+      // 1. Checa se o usuário pausou globalmente
       if (!isRunningRef.current) {
         setIsNightPause(false); 
         return;
@@ -269,8 +276,20 @@ const App: React.FC = () => {
 
       const currentHour = new Date().getHours();
       const isSleepTime = currentHour >= 1 && currentHour < 8;
-      setIsNightPause(isSleepTime);
-      if (isSleepTime) return;
+
+      // 2. Lógica de Override (Rearme Diurno)
+      // Se não for hora de dormir (ex: 9h da manhã) e o override estiver ativo,
+      // desativa o override para que, na próxima noite, ele pause automaticamente.
+      if (!isSleepTime && overrideNightModeRef.current) {
+        setOverrideNightMode(false);
+      }
+
+      // 3. Decide se deve pausar
+      // Pausa SE for horário de dormir E o usuário NÃO tiver forçado a execução
+      const effectivePause = isSleepTime && !overrideNightModeRef.current;
+      
+      setIsNightPause(effectivePause);
+      if (effectivePause) return;
 
       // WATCHDOG
       if (processingRef.current) {
@@ -359,9 +378,7 @@ const App: React.FC = () => {
                 message: result.error || undefined,
                 nextUpdate: nextTime,
                 isAck: shouldResetAck ? false : i.isAck, 
-                // CORREÇÃO AQUI: Se não houver novo drop (isPriceDrop false), 
-                // mas já existia um drop não visto (i.hasPriceDrop true), mantemos TRUE.
-                // Só sai se o usuário clicar no 'olho' (isAck = true limpa hasPriceDrop via função acknowledgeItem)
+                // Persiste o status de queda até ser visto
                 hasPriceDrop: isPriceDrop ? true : i.hasPriceDrop
               };
             });
@@ -390,6 +407,20 @@ const App: React.FC = () => {
   // -- Handlers --
   const toggleAutomation = () => {
     initAudio(); // Destrava o áudio ao clicar
+    
+    // Se estivermos LIGANDO a automação
+    if (!isRunning) {
+        const h = new Date().getHours();
+        // Se for hora de dormir (01-08) e o usuário mandou ligar, ativamos o OVERRIDE
+        if (h >= 1 && h < 8) {
+            setOverrideNightMode(true);
+        }
+    } else {
+        // Se estivermos DESLIGANDO, resetamos o override para garantir 
+        // que na próxima vez respeite o horário (salvo se usuário forçar novamente)
+        setOverrideNightMode(false);
+    }
+
     setIsRunning(!isRunning);
   };
 
@@ -591,9 +622,15 @@ const App: React.FC = () => {
           <div className="flex flex-wrap items-center gap-3 mt-1">
              <p className="text-xs text-slate-500">Atualização em Lote (2 itens / 2s)</p>
              
-             {isRunning && isNightPause && (
+             {isRunning && isNightPause && !overrideNightMode && (
                <span className="flex items-center gap-1 text-[10px] bg-yellow-500/10 text-yellow-500 border border-yellow-500/30 px-2 py-0.5 rounded font-medium">
                  <Moon size={10} /> Pausa Agendada (01h-08h)
+               </span>
+             )}
+             
+             {isRunning && isNightPause && overrideNightMode && (
+               <span className="flex items-center gap-1 text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded font-medium animate-pulse">
+                 <Zap size={10} /> Forçando Execução (Noite)
                </span>
              )}
              
