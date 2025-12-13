@@ -111,7 +111,7 @@ app.get('/api/search', async (req, res) => {
   console.log(`[SCRAPER] Buscando: ${item}`);
 
   try {
-    // Headers Reforçados para evitar 403/502 e simular navegador real
+    // Headers Reforçados para evitar 403/502 (Mantido da versão funcional)
     const headers = {
       'Cookie': userCookie,
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
@@ -128,7 +128,7 @@ app.get('/api/search', async (req, res) => {
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000); // Aumentado para 20s
+    const timeoutId = setTimeout(() => controller.abort(), 20000); 
 
     const response = await fetch(targetUrl, { 
       method: 'GET', 
@@ -157,7 +157,7 @@ app.get('/api/search', async (req, res) => {
     const htmlTextRaw = await response.text();
     console.log(`📡 HTTP ${status} - ${htmlTextRaw.length} chars`);
     
-    // LIMPEZA: Remove quebras de linha e espaços extras
+    // LIMPEZA BÁSICA
     const htmlText = htmlTextRaw.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ');
 
     // 2. Verificações de Conteúdo (Login/Bloqueio)
@@ -170,35 +170,19 @@ app.get('/api/search', async (req, res) => {
     }
 
     // =======================================================
-    // BUSCA DE PREÇO - ESTRATÉGIA "TABLE SCOPE" (CORREÇÃO DEFINITIVA)
+    // BUSCA DE PREÇO - RETORNO À LÓGICA CLÁSSICA
     // =======================================================
     
-    // Passo 1: Isolamos o corpo da tabela (tbody) para ignorar o Header (onde fica o saldo de 20kk)
-    // Se não encontrar tbody, usa o texto todo (fallback)
-    const tbodyMatch = htmlText.match(/<tbody[^>]*>([\s\S]*?)<\/tbody>/i);
-    const searchContext = tbodyMatch ? tbodyMatch[1] : htmlText;
-
     let pricesFound = [];
 
-    // Regex Flexível: Busca qualquer número com pontos (Ex: 150.000 ou 1.000.000)
-    // Como estamos dentro do <tbody>, é quase certeza que é um preço ou quantidade.
-    // O padrão exige pelo menos um ponto separando milhares para evitar IDs ou quantidades simples (1, 10).
-    // Exemplo que casa: 150.000, 1.200.000
-    // Exemplo que NÃO casa: 2024 (ano), 1 (qtd), 50 (qtd)
-    const priceRegex = /([1-9][0-9]{0,2}(?:\.[0-9]{3})+)/g;
+    // Regex Original Robusta: Procura número + 'z'
+    // Ex: 1.000 z | 1.000z | 1.000 <span...>z
+    // Essa regex garante que é um valor monetário e evita números aleatórios do site
+    const priceRegex = /([0-9]{1,3}(?:[.,][0-9]{3})*)\s*(?:<[^>]+>\s*)*z/gi;
     
-    const matches = [...searchContext.matchAll(priceRegex)];
+    const matches = [...htmlText.matchAll(priceRegex)];
     for (const m of matches) {
        pricesFound.push(parsePriceString(m[1]));
-    }
-
-    // Se a estratégia flexível falhar, tentamos o Regex estrito com 'z' no contexto todo (fallback)
-    if (pricesFound.length === 0) {
-        const fallbackRegex = /([0-9]{1,3}(?:[.,][0-9]{3})*)\s*(?:<[^>]+>\s*)*z/gi;
-        const matchesFallback = [...htmlText.matchAll(fallbackRegex)];
-        for (const m of matchesFallback) {
-             pricesFound.push(parsePriceString(m[1]));
-        }
     }
 
     // FILTRAGEM DE PREÇOS
@@ -206,12 +190,14 @@ app.get('/api/search', async (req, res) => {
       .filter(val => {
          if (isNaN(val)) return false;
          if (val < 100) return false; // Ignora quantidades pequenas
-         if (val > 3000000000) return false; // Ignora valores absurdos (> 3bi)
          
-         // IMPORTANTE: Se encontrarmos o valor exato 20kk DENTRO da tabela, é válido.
-         // Se for fora (header), o isolamento do tbody já resolveu.
+         // FILTRO CRÍTICO: Ignora o saldo do cabeçalho
+         // Se o usuário tem 20kk ou se é um placeholder do site, removemos.
+         if (val === 20000000) return false; 
+
+         if (val > 3000000000) return false; // > 3bi = erro
          
-         // Filtra anos soltos que coincidam com valores (raro com pontos, mas preventivo)
+         // Filtra anos
          if (val >= 2023 && val <= 2026) return false;
          
          return true;
@@ -236,8 +222,7 @@ app.get('/api/search', async (req, res) => {
         return res.json({ success: true, price: 0, error: 'Sem ofertas' });
     }
     
-    // Debug: Se não achou preço mas não tem erro explícito, logamos para análise
-    console.log(`[FALHA] HTML recebido mas sem preço para: ${item}`);
+    console.log(`[FALHA] Preço não encontrado no HTML para: ${item}`);
     return res.json({ success: false, price: null, error: 'Formato desconhecido' });
 
   } catch (error) {
