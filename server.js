@@ -48,14 +48,17 @@ const cleanStartupData = () => {
   GLOBAL_DB.items = GLOBAL_DB.items.map(item => {
     // Se tiver aquele erro de JSON específico, reseta
     if (item.status === 'ERRO' && item.message && item.message.includes('Unexpected token')) {
-      console.log(`[FIX] Resetando item travado: ${item.name}`);
+      console.log(`[FIX] Resetando item com erro JSON: ${item.name}`);
       changed = true;
       return { ...item, status: 'IDLE', nextUpdate: 0, message: undefined };
     }
     // Se ficou travado em LOADING por desligamento incorreto
     if (item.status === 'LOADING') {
+      console.log(`[FIX] Destravando item no boot: ${item.name}`);
       changed = true;
-      return { ...item, status: 'IDLE', nextUpdate: 0 };
+      // Remove prop interna se existir
+      const { _loadingStart, ...rest } = item;
+      return { ...rest, status: 'IDLE', nextUpdate: 0 };
     }
     return item;
   });
@@ -186,7 +189,17 @@ app.post('/api/db', (req, res) => {
     if (!Array.isArray(items) || typeof settings !== 'object') {
       return res.status(400).json({ error: 'Formato inválido' });
     }
-    GLOBAL_DB.items = items;
+    // Ao receber dados do front, preservamos _loadingStart se existir nos itens do banco atual
+    // para evitar que o front (que desconhece essa prop) a apague acidentalmente
+    const newItems = items.map(newItem => {
+        const existing = GLOBAL_DB.items.find(i => i.id === newItem.id);
+        if (existing && existing._loadingStart) {
+            return { ...newItem, _loadingStart: existing._loadingStart };
+        }
+        return newItem;
+    });
+
+    GLOBAL_DB.items = newItems;
     GLOBAL_DB.settings = settings;
     saveDB();
     res.json({ success: true });
@@ -212,17 +225,52 @@ app.get('/api/health', (req, res) => {
 });
 
 // =======================================================
-// BACKGROUND AUTOMATION LOOPS (DUAL WORKERS)
+// BACKGROUND AUTOMATION LOOPS (DUAL WORKERS + WATCHDOG)
 // =======================================================
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; 
 const LOOP_TICK_MS = 2000; 
+
+// Watchdog: Garante que nada fique preso em LOADING pra sempre
+const startWatchdog = () => {
+  setInterval(() => {
+    if (!GLOBAL_DB.settings?.isRunning) return;
+    
+    const now = Date.now();
+    let changed = false;
+
+    GLOBAL_DB.items = GLOBAL_DB.items.map(item => {
+       // Se está carregando E (tem timestamp antigo OU não tem timestamp mas está carregando)
+       if (item.status === 'LOADING') {
+          // Timeout de segurança de 45s (fetch tem timeout de 20s)
+          const isStuck = item._loadingStart ? (now - item._loadingStart > 45000) : true;
+          
+          if (isStuck) {
+             console.log(`[WATCHDOG] 🐕 Destravando item preso: ${item.name}`);
+             changed = true;
+             // Limpa props internas
+             const { _loadingStart, ...rest } = item; 
+             return { 
+                 ...rest, 
+                 status: 'ERRO', 
+                 message: 'Timeout (Destravado)', 
+                 nextUpdate: now + 5000 // Tenta de novo em 5s
+             };
+          }
+       }
+       return item;
+    });
+
+    if (changed) saveDB();
+  }, 15000); // Roda a cada 15s
+};
 
 // Função auxiliar para processar um item
 const processItem = async (item, workerName) => {
   console.log(`[${workerName}] Verificando: ${item.name}`);
   
-  // 1. Marca imediatamente para ninguém mais pegar
+  // 1. Marca imediatamente com timestamp de inicio
   item.status = 'LOADING';
+  item._loadingStart = Date.now();
   saveDB(); 
 
   // 2. Processa
@@ -245,11 +293,12 @@ const processItem = async (item, workerName) => {
 
   const shouldResetAck = isPriceDrop || (isDeal && !wasDeal);
 
-  // 3. Atualiza Objeto
+  // 3. Atualiza Objeto e Limpa timestamp interno
+  delete item._loadingStart;
+  
   item.lastPrice = newPrice;
   item.lastUpdated = new Date().toISOString();
   item.status = isSuccess ? (newPrice === 0 ? 'ALERTA' : 'OK') : 'ERRO';
-  // Adiciona tag do worker no erro para diagnóstico
   item.message = result.error ? `[${workerName}] ${result.error}` : undefined;
   item.nextUpdate = isSuccess ? (Date.now() + UPDATE_INTERVAL_MS) : (Date.now() + 60000);
   
@@ -264,6 +313,7 @@ const processItem = async (item, workerName) => {
 
 const startAutomationLoop = () => {
   console.log("🚀 Automação de Background Iniciada (Modo Dual: TOP & BOT)");
+  startWatchdog();
   
   // WORKER 1: Cima para Baixo (TOP)
   setInterval(async () => {
@@ -275,14 +325,12 @@ const startAutomationLoop = () => {
     const candidates = GLOBAL_DB.items.filter(i => i.nextUpdate <= now && i.status !== 'LOADING');
 
     if (candidates.length > 0) {
-      // Pega o PRIMEIRO da fila
       const item = candidates[0];
       await processItem(item, "TOP");
     }
   }, LOOP_TICK_MS);
 
   // WORKER 2: Baixo para Cima (BOT)
-  // Pequeno delay inicial para desencontrar os logs
   setTimeout(() => {
     setInterval(async () => {
       if (!GLOBAL_DB.settings?.isRunning) return;
@@ -290,11 +338,9 @@ const startAutomationLoop = () => {
       if (h >= 1 && h < 8) return;
 
       const now = Date.now();
-      // Refiltra (pois o Worker 1 pode ter pego algo milissegundos antes)
       const candidates = GLOBAL_DB.items.filter(i => i.nextUpdate <= now && i.status !== 'LOADING');
 
       if (candidates.length > 0) {
-        // Pega o ÚLTIMO da fila
         const item = candidates[candidates.length - 1];
         await processItem(item, "BOT");
       }
@@ -308,7 +354,7 @@ app.get('*', (req, res) => {
   if (fs.existsSync(join(distPath, 'index.html'))) {
     res.sendFile(join(distPath, 'index.html'));
   } else {
-    res.send('Backend Server Online. Dual Workers Running.');
+    res.send('Backend Server Online. Dual Workers + Watchdog Running.');
   }
 });
 
