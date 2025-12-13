@@ -111,18 +111,24 @@ app.get('/api/search', async (req, res) => {
   console.log(`[SCRAPER] Buscando: ${item}`);
 
   try {
-    // Headers idênticos ao GAS (exceto Cookie que vem dinâmico)
+    // Headers Reforçados para evitar 403/502 e simular navegador real
     const headers = {
       'Cookie': userCookie,
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
       'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-      'Cache-Control': 'no-cache',
-      'Upgrade-Insecure-Requests': '1'
+      'Referer': 'https://ro.gnjoylatam.com/',
+      'Origin': 'https://ro.gnjoylatam.com',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'same-origin',
+      'Sec-Fetch-User': '?1'
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 20000); // Aumentado para 20s
 
     const response = await fetch(targetUrl, { 
       method: 'GET', 
@@ -137,7 +143,11 @@ app.get('/api/search', async (req, res) => {
     // 1. Verificações de Status HTTP
     if (status === 403 || status === 401) {
         console.error(`[ERRO] Acesso negado: ${status}`);
-        return res.json({ success: false, price: null, error: `Acesso negado (cookie?)` });
+        return res.json({ success: false, price: null, error: `Acesso negado (Verifique o Cookie)` });
+    }
+
+    if (status === 502 || status === 500) {
+        return res.json({ success: false, price: null, error: `Erro Servidor RO (${status})` });
     }
 
     if (!response.ok) {
@@ -147,63 +157,74 @@ app.get('/api/search', async (req, res) => {
     const htmlTextRaw = await response.text();
     console.log(`📡 HTTP ${status} - ${htmlTextRaw.length} chars`);
     
-    // LIMPEZA: Remove quebras de linha e espaços extras para facilitar o Regex
+    // LIMPEZA: Remove quebras de linha e espaços extras
     const htmlText = htmlTextRaw.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ');
 
     // 2. Verificações de Conteúdo (Login/Bloqueio)
     if (htmlText.includes('member/login') || htmlText.includes('signin-form') || htmlText.includes('name="password"')) {
-        return res.json({ success: false, price: null, error: 'Precisa fazer login' });
+        return res.json({ success: false, price: null, error: 'Login Expirado' });
     }
 
     if (htmlText.includes('Access Denied') || htmlText.includes('access denied')) {
-        return res.json({ success: false, price: null, error: 'Acesso bloqueado' });
+        return res.json({ success: false, price: null, error: 'IP Bloqueado' });
     }
 
     // =======================================================
-    // BUSCA DE PREÇO (Corrigida)
+    // BUSCA DE PREÇO - ESTRATÉGIA "TABLE SCOPE" (CORREÇÃO DEFINITIVA)
     // =======================================================
     
+    // Passo 1: Isolamos o corpo da tabela (tbody) para ignorar o Header (onde fica o saldo de 20kk)
+    // Se não encontrar tbody, usa o texto todo (fallback)
+    const tbodyMatch = htmlText.match(/<tbody[^>]*>([\s\S]*?)<\/tbody>/i);
+    const searchContext = tbodyMatch ? tbodyMatch[1] : htmlText;
+
     let pricesFound = [];
 
-    // Regex Ajustada: 
-    // 1. Procura sequência numérica (ex: 100, 1.000, 1.500.000)
-    // 2. Permite opcionalmente tags HTML entre o número e o 'z' (ex: <span>1.000</span><span>z</span>)
-    // 3. Exige a presença da letra 'z' ou 'Z' no final para confirmar que é moeda.
-    const priceRegex = /([0-9]{1,3}(?:[.,][0-9]{3})*)\s*(?:<[^>]+>\s*)*z/gi;
+    // Regex Flexível: Busca qualquer número com pontos (Ex: 150.000 ou 1.000.000)
+    // Como estamos dentro do <tbody>, é quase certeza que é um preço ou quantidade.
+    // O padrão exige pelo menos um ponto separando milhares para evitar IDs ou quantidades simples (1, 10).
+    // Exemplo que casa: 150.000, 1.200.000
+    // Exemplo que NÃO casa: 2024 (ano), 1 (qtd), 50 (qtd)
+    const priceRegex = /([1-9][0-9]{0,2}(?:\.[0-9]{3})+)/g;
     
-    const matches = [...htmlText.matchAll(priceRegex)];
+    const matches = [...searchContext.matchAll(priceRegex)];
     for (const m of matches) {
        pricesFound.push(parsePriceString(m[1]));
     }
 
+    // Se a estratégia flexível falhar, tentamos o Regex estrito com 'z' no contexto todo (fallback)
+    if (pricesFound.length === 0) {
+        const fallbackRegex = /([0-9]{1,3}(?:[.,][0-9]{3})*)\s*(?:<[^>]+>\s*)*z/gi;
+        const matchesFallback = [...htmlText.matchAll(fallbackRegex)];
+        for (const m of matchesFallback) {
+             pricesFound.push(parsePriceString(m[1]));
+        }
+    }
+
     // FILTRAGEM DE PREÇOS
-    // Remove duplicatas, ordena e filtra valores inválidos
     const validPrices = pricesFound
       .filter(val => {
          if (isNaN(val)) return false;
-         // Filtro de segurança: menor que 100z é provavelmente erro/quantidade
-         if (val < 100) return false;
+         if (val < 100) return false; // Ignora quantidades pequenas
+         if (val > 3000000000) return false; // Ignora valores absurdos (> 3bi)
          
-         // FILTRO ESPECÍFICO PARA O BUG DOS 20KK
-         // O valor 20.000.000 aparece com frequência como "Limite de busca" ou "Saldo" na interface
-         // Se este valor exato aparecer, ignoramos para evitar falsos positivos
-         if (val === 20000000) return false; 
-
-         // Filtro de segurança: maior que 4bi é provavelmente erro 
-         if (val > 2500000000) return false;
-         // Filtro de ano: ignora 2023, 2024, 2025 se aparecerem soltos
+         // IMPORTANTE: Se encontrarmos o valor exato 20kk DENTRO da tabela, é válido.
+         // Se for fora (header), o isolamento do tbody já resolveu.
+         
+         // Filtra anos soltos que coincidam com valores (raro com pontos, mas preventivo)
          if (val >= 2023 && val <= 2026) return false;
+         
          return true;
       })
       .sort((a, b) => a - b); // Ordena do menor para o maior
 
     if (validPrices.length > 0) {
         const bestPrice = validPrices[0];
-        console.log(`[SUCESSO] ${item}: ${bestPrice} (Encontrados: ${validPrices.length})`);
+        console.log(`[SUCESSO] ${item}: ${bestPrice} z`);
         return res.json({ success: true, price: bestPrice });
     }
 
-    // 3. Verifica se realmente não há resultados (mensagem do site)
+    // 3. Verifica "Sem resultados"
     if (
       htmlText.includes('não foram encontrados') || 
       htmlText.includes('No results') || 
@@ -215,12 +236,13 @@ app.get('/api/search', async (req, res) => {
         return res.json({ success: true, price: 0, error: 'Sem ofertas' });
     }
     
-    console.log(`[FALHA] Preço não encontrado no HTML para: ${item}`);
-    return res.json({ success: false, price: null, error: 'Preço não encontrado' });
+    // Debug: Se não achou preço mas não tem erro explícito, logamos para análise
+    console.log(`[FALHA] HTML recebido mas sem preço para: ${item}`);
+    return res.json({ success: false, price: null, error: 'Formato desconhecido' });
 
   } catch (error) {
     console.error(`[ERRO CRÍTICO] ${item}:`, error.message);
-    return res.json({ success: false, price: null, error: error.toString() });
+    return res.json({ success: false, price: null, error: error.message });
   }
 });
 
