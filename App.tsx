@@ -311,10 +311,13 @@ const App: React.FC = () => {
       setIsNightPause(effectivePause);
       if (effectivePause) return;
 
+      // WATCHDOG MELHORADO: Reseta itens travados
       if (processingRef.current) {
         if (Date.now() - processingStartTimeRef.current > WATCHDOG_TIMEOUT_MS) {
-           console.warn("⚠️ Watchdog: Processamento travado detectado. Reiniciando fila.");
+           console.warn("⚠️ Watchdog: Processamento travado detectado. Reiniciando fila e resetando itens.");
            processingRef.current = false;
+           // Força reset de itens que ficaram presos em LOADING
+           setItems(prev => prev.map(i => i.status === Status.LOADING ? { ...i, status: Status.IDLE } : i));
         }
         return;
       }
@@ -347,7 +350,6 @@ const App: React.FC = () => {
           const results = await Promise.all(promises);
           lastFetchTimeRef.current = Date.now();
           
-          // Variável para armazenar a lista atualizada e salvar
           let listToSave: Item[] = [];
 
           setItems(prev => {
@@ -403,7 +405,6 @@ const App: React.FC = () => {
             return updatedList; 
           });
           
-          // SALVA APÓS ATUALIZAÇÃO DO ROBÔ
           if (listToSave.length > 0) {
               await saveData(listToSave, settingsRef.current);
           }
