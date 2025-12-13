@@ -434,6 +434,30 @@ const App: React.FC = () => {
   const currentHour = new Date().getHours();
   const isNightPause = currentHour >= 1 && currentHour < 8;
 
+  // -- EFEITO DE ABA PISCANDO (BROWSER TAB FLASHING) --
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    const defaultTitle = "Ragnarok Market Tracker";
+
+    if (activeAlertsCount > 0) {
+       let state = false;
+       interval = setInterval(() => {
+          document.title = state 
+            ? `(${activeAlertsCount}) 🔔 ALERTA!` 
+            : `(${activeAlertsCount}) 💰 OPORTUNIDADE!`;
+          state = !state;
+       }, 1000); // Pisca a cada 1 segundo
+    } else {
+       document.title = defaultTitle;
+    }
+
+    return () => {
+       clearInterval(interval);
+       // Só reseta se o count zerar, para evitar flicker durante updates
+       if (activeAlertsCount === 0) document.title = defaultTitle; 
+    };
+  }, [activeAlertsCount]);
+
   if (!dataLoaded) return <div className="min-h-screen bg-[#0d1117] flex items-center justify-center text-slate-400"><Activity className="animate-spin mr-2"/> Carregando Nuvem...</div>;
 
   return (
