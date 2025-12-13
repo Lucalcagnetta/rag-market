@@ -39,11 +39,52 @@ const App: React.FC = () => {
   // Inicializa lendo do localStorage, ou vazio se não existir
   const [calcPrice, setCalcPrice] = useState(() => localStorage.getItem('ro_calc_price') || '');
   const [calcQty, setCalcQty] = useState('');
+  const [calcTotal, setCalcTotal] = useState('');
 
   // Salva o preço no localStorage sempre que ele mudar
   useEffect(() => {
     localStorage.setItem('ro_calc_price', calcPrice);
   }, [calcPrice]);
+
+  // -- Calculator Handlers (Bidirectional) --
+  const handleCalcPriceChange = (val: string) => {
+      setCalcPrice(val);
+      const p = parseFloat(val.replace(',', '.'));
+      const q = parseFloat(calcQty.replace(',', '.'));
+      
+      if (!isNaN(p) && !isNaN(q)) {
+          setCalcTotal((p * q).toFixed(2).replace('.', ','));
+      } else if (val === '') {
+          setCalcTotal('');
+      }
+  };
+
+  const handleCalcQtyChange = (val: string) => {
+      setCalcQty(val);
+      const p = parseFloat(calcPrice.replace(',', '.'));
+      const q = parseFloat(val.replace(',', '.'));
+
+      if (!isNaN(p) && !isNaN(q)) {
+          setCalcTotal((p * q).toFixed(2).replace('.', ','));
+      } else if (val === '') {
+          setCalcTotal('');
+      }
+  };
+
+  const handleCalcTotalChange = (val: string) => {
+      setCalcTotal(val);
+      const p = parseFloat(calcPrice.replace(',', '.'));
+      const t = parseFloat(val.replace(',', '.'));
+
+      if (!isNaN(p) && p !== 0 && !isNaN(t)) {
+          // Calcula a quantidade inversa: Total / Preço
+          const result = t / p;
+          // Formata para evitar dizimas muito longas, max 3 casas decimais para Kks
+          setCalcQty(parseFloat(result.toFixed(3)).toString().replace('.', ','));
+      } else if (val === '') {
+          setCalcQty('');
+      }
+  };
 
   // Local state for settings form
   const [tempSettings, setTempSettings] = useState<Settings>(settings);
@@ -287,12 +328,6 @@ const App: React.FC = () => {
     return val.toLocaleString('pt-BR'); 
   };
   
-  const calcTotal = () => {
-    const p = parseFloat(calcPrice.replace(',', '.')) || 0;
-    const q = parseFloat(calcQty.replace(',', '.')) || 0;
-    return (p * q).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  };
-
   const addNewItem = () => {
     initAudio();
     if (!newItemName.trim()) return;
@@ -461,7 +496,7 @@ const App: React.FC = () => {
                    className="w-full bg-transparent text-xs font-mono text-white focus:outline-none"
                    placeholder="0,00"
                    value={calcPrice}
-                   onChange={e => setCalcPrice(e.target.value)}
+                   onChange={e => handleCalcPriceChange(e.target.value)}
                  />
               </div>
            </div>
@@ -473,17 +508,21 @@ const App: React.FC = () => {
                    className="w-full bg-transparent text-xs font-mono text-white focus:outline-none text-center"
                    placeholder="0"
                    value={calcQty}
-                   onChange={e => setCalcQty(e.target.value)}
+                   onChange={e => handleCalcQtyChange(e.target.value)}
                  />
               </div>
            </div>
            <span className="text-slate-500 mt-4">=</span>
            <div className="flex flex-col">
-              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Total</span>
-              <div className="flex items-center bg-slate-900 border border-slate-700 rounded px-2 py-1 min-w-[90px] justify-center">
-                 <span className="text-xs font-mono text-emerald-400 font-bold">
-                    {calcTotal()}
-                 </span>
+              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Total Reais</span>
+              <div className="flex items-center bg-slate-900 border border-slate-700 rounded px-2 py-1 w-24">
+                 <span className="text-xs text-slate-500 mr-1">R$</span>
+                 <input 
+                   className="w-full bg-transparent text-xs font-mono text-white focus:outline-none"
+                   placeholder="0,00"
+                   value={calcTotal}
+                   onChange={e => handleCalcTotalChange(e.target.value)}
+                 />
               </div>
            </div>
         </div>
