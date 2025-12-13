@@ -160,24 +160,20 @@ app.get('/api/search', async (req, res) => {
     }
 
     // =======================================================
-    // BUSCA DE PREÇO (Melhorada)
+    // BUSCA DE PREÇO (Corrigida)
     // =======================================================
     
     let pricesFound = [];
 
-    // MÉTODO 1: Regex específico para formato "100.000 z" entre tags (Maior certeza)
-    const method1Regex = />\s*([0-9]{1,3}(?:[.,][0-9]{3})*)\s*z\s*</gi;
-    const matches1 = [...htmlText.matchAll(method1Regex)];
-    for (const m of matches1) {
-       pricesFound.push(parsePriceString(m[1]));
-    }
-
-    // MÉTODO 2: Busca números soltos formatados com pontos (Ex: 150.000 ou 1.000.000)
-    // Isso pega itens onde o 'z' está longe ou formatado diferente.
-    // O padrão exige pelo menos um ponto separando milhares para evitar pegar IDs ou quantidades pequenas (1, 10).
-    const method2Regex = /([1-9][0-9]{0,2}(?:\.[0-9]{3})+)/g;
-    const matches2 = [...htmlText.matchAll(method2Regex)];
-    for (const m of matches2) {
+    // Regex Ajustada: 
+    // 1. Procura sequência numérica (ex: 100, 1.000, 1.500.000)
+    // 2. Permite opcionalmente tags HTML entre o número e o 'z' (ex: <span>1.000</span><span>z</span>)
+    // 3. Exige a presença da letra 'z' ou 'Z' no final para confirmar que é moeda.
+    // Isso evita pegar números aleatórios da página (como IDs, versões, contadores)
+    const priceRegex = /([0-9]{1,3}(?:[.,][0-9]{3})*)\s*(?:<[^>]+>\s*)*z/gi;
+    
+    const matches = [...htmlText.matchAll(priceRegex)];
+    for (const m of matches) {
        pricesFound.push(parsePriceString(m[1]));
     }
 
@@ -188,9 +184,10 @@ app.get('/api/search', async (req, res) => {
          if (isNaN(val)) return false;
          // Filtro de segurança: menor que 100z é provavelmente erro/quantidade
          if (val < 100) return false;
-         // Filtro de segurança: maior que 2bi é provavelmente erro
-         if (val > 2000000000) return false;
-         // Filtro de ano: ignora 2023, 2024, 2025 se aparecerem soltos (muito comum em footers)
+         // Filtro de segurança: maior que 4bi é provavelmente erro (limite do jogo é ~2.1bi, mas vendas podem exceder em logs antigos?) 
+         // Vamos manter 2.5bi por segurança
+         if (val > 2500000000) return false;
+         // Filtro de ano: ignora 2023, 2024, 2025 se aparecerem soltos
          if (val >= 2023 && val <= 2026) return false;
          return true;
       })
