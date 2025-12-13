@@ -46,9 +46,9 @@ const playAlertSound = () => {
 };
 
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; // 2 Minutes
-const SAFETY_DELAY_MS = 500; // Delay super curto para processamento sequencial rápido
-const BATCH_SIZE = 1; // 1 por vez para estabilidade máxima (evita travamento em par)
-const WATCHDOG_TIMEOUT_MS = 20000; // 20s para considerar travado
+const SAFETY_DELAY_MS = 2000; // Delay entre lotes
+const BATCH_SIZE = 2; // Processa 2 itens por vez
+const WATCHDOG_TIMEOUT_MS = 30000; // 30s para considerar travado e resetar
 
 const App: React.FC = () => {
   // -- State --
@@ -219,34 +219,42 @@ const App: React.FC = () => {
 
       const currentItems = itemsRef.current;
       
-      // Busca UM candidato que precisa de atualização
-      const candidate = currentItems
-        .find(i => i.nextUpdate <= now && i.status !== Status.LOADING);
+      // Busca candidatos que precisam de atualização
+      // Pega até BATCH_SIZE (2) itens para processar em paralelo
+      const candidates = currentItems
+        .filter(i => i.nextUpdate <= now && i.status !== Status.LOADING)
+        .slice(0, BATCH_SIZE);
 
-      if (candidate) {
+      if (candidates.length > 0) {
         processingRef.current = true;
         processingStartTimeRef.current = Date.now();
         
-        // Marca como LOADING
-        setItems(prev => prev.map(i => i.id === candidate.id ? { ...i, status: Status.LOADING } : i));
+        // Marca todos como LOADING
+        const candidateIds = candidates.map(c => c.id);
+        setItems(prev => prev.map(i => candidateIds.includes(i.id) ? { ...i, status: Status.LOADING } : i));
 
         try {
-          // Busca individual
-          const result = await fetchPrice(
-             candidate.name, 
-             settingsRef.current.cookie,
-             settingsRef.current.useProxy,
-             settingsRef.current.proxyUrl
+          // Dispara requisições em paralelo
+          const promises = candidates.map(candidate => 
+             fetchPrice(
+                candidate.name, 
+                settingsRef.current.cookie,
+                settingsRef.current.useProxy,
+                settingsRef.current.proxyUrl
+              ).then(result => ({ candidateId: candidate.id, result }))
           );
 
+          const results = await Promise.all(promises);
           lastFetchTimeRef.current = Date.now();
 
           setItems(prev => {
             let shouldPlaySound = false;
 
             const updatedList = prev.map(i => {
-              if (i.id !== candidate.id) return i;
+              const resObj = results.find(r => r.candidateId === i.id);
+              if (!resObj) return i;
 
+              const result = resObj.result;
               const isSuccess = result.success;
               const newPrice = result.price;
               const oldPrice = i.lastPrice;
@@ -266,10 +274,10 @@ const App: React.FC = () => {
 
               const shouldAlert = isDeal || isPriceDrop;
 
-              // Calcula próximo update. Se deu erro, tenta mais cedo (15s) senão intervalo normal
+              // Calcula próximo update. Se deu erro, tenta mais cedo (30s) senão intervalo normal
               const nextTime = isSuccess 
                  ? Date.now() + UPDATE_INTERVAL_MS 
-                 : Date.now() + 15000; 
+                 : Date.now() + 30000; 
 
               return {
                 ...i,
@@ -289,9 +297,9 @@ const App: React.FC = () => {
           });
 
         } catch (e) {
-          console.error("Erro no processamento:", e);
-          // Em caso de falha catastrófica, libera o item
-          setItems(prev => prev.map(i => i.id === candidate.id ? { ...i, status: Status.ERRO, nextUpdate: Date.now() + 60000 } : i));
+          console.error("Erro no lote:", e);
+          // Em caso de falha catastrófica no Promise.all, libera todos do lote
+          setItems(prev => prev.map(i => candidateIds.includes(i.id) ? { ...i, status: Status.ERRO, nextUpdate: Date.now() + 60000 } : i));
         } finally {
           processingRef.current = false;
         }
@@ -486,7 +494,7 @@ const App: React.FC = () => {
             Ragnarok Market Tracker
           </h1>
           <div className="flex flex-wrap items-center gap-3 mt-1">
-             <p className="text-xs text-slate-500">Atualização a cada 2 minutos (Sequencial Rápido)</p>
+             <p className="text-xs text-slate-500">Atualização a cada 2 minutos (2 itens por vez)</p>
              
              {isRunning && isNightPause && (
                <span className="flex items-center gap-1 text-[10px] bg-yellow-500/10 text-yellow-500 border border-yellow-500/30 px-2 py-0.5 rounded font-medium">
