@@ -1,3 +1,4 @@
+
 import express from 'express';
 import cors from 'cors';
 import { fileURLToPath } from 'url';
@@ -11,12 +12,28 @@ const app = express();
 const PORT = 3001;
 const HOST = '0.0.0.0';
 
+// Configuração do Banco de Dados JSON
+const DATA_DIR = join(__dirname, 'data');
+const DB_FILE = join(DATA_DIR, 'db.json');
+
+// Garante que a pasta de dados existe
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR);
+}
+
+// Inicializa o DB se não existir
+if (!fs.existsSync(DB_FILE)) {
+  fs.writeFileSync(DB_FILE, JSON.stringify({ items: [], settings: {} }));
+}
+
 app.use(cors());
 app.use(express.json());
 
 // Log básico de requisições
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  if (req.url !== '/api/health') { // Evita spam de log no health check
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  }
   next();
 });
 
@@ -26,7 +43,43 @@ if (fs.existsSync(distPath)) {
 }
 
 // =======================================================
-// LÓGICA ESPELHADA DO GOOGLE APPS SCRIPT
+// ROTAS DE PERSISTÊNCIA (BANCO DE DADOS)
+// =======================================================
+
+// Ler dados
+app.get('/api/db', (req, res) => {
+  try {
+    if (!fs.existsSync(DB_FILE)) {
+      return res.json({ items: [], settings: {} });
+    }
+    const data = fs.readFileSync(DB_FILE, 'utf8');
+    res.json(JSON.parse(data));
+  } catch (error) {
+    console.error('Erro ao ler DB:', error);
+    res.status(500).json({ error: 'Erro ao ler dados' });
+  }
+});
+
+// Salvar dados
+app.post('/api/db', (req, res) => {
+  try {
+    const { items, settings } = req.body;
+    // Validação básica
+    if (!Array.isArray(items) || typeof settings !== 'object') {
+      return res.status(400).json({ error: 'Formato inválido' });
+    }
+
+    fs.writeFileSync(DB_FILE, JSON.stringify({ items, settings }, null, 2));
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erro ao salvar DB:', error);
+    res.status(500).json({ error: 'Erro ao salvar dados' });
+  }
+});
+
+
+// =======================================================
+// LÓGICA ESPELHADA DO GOOGLE APPS SCRIPT (SCRAPER)
 // =======================================================
 
 // Função auxiliar idêntica ao GAS

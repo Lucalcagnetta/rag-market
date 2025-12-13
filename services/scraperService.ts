@@ -1,3 +1,4 @@
+
 import { ScrapeResult } from '../types';
 
 export const fetchPrice = async (

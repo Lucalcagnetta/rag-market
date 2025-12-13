@@ -1,3 +1,4 @@
+
 export enum Status {
   IDLE = 'IDLE',
   LOADING = 'LOADING',
@@ -15,6 +16,7 @@ export interface Item {
   status: Status;
   message?: string;
   nextUpdate: number; // Timestamp for next scheduled check
+  isAck?: boolean; // Se o usuário já "viu" a oferta atual
 }
 
 export interface Settings {
