@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Item, Settings, Status, ScrapeResult } from './types';
+import { Item, Settings, Status } from './types';
 import { INITIAL_SETTINGS, MOCK_ITEMS } from './constants';
 import { fetchPrice } from './services/scraperService';
 import { 
@@ -18,14 +18,11 @@ import {
   Database,
   Moon,
   Sun,
-  TrendingDown,
-  ListChecks
+  TrendingDown
 } from 'lucide-react';
 
-// -- SOUNDS --
-
-// Som 1: Preço caiu (mas não bateu o alvo) - Beep simples descendente
-const playPriceDropSound = () => {
+// Simple notification sound (beep)
+const playAlertSound = () => {
   try {
     const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
     const oscillator = audioContext.createOscillator();
@@ -35,65 +32,25 @@ const playPriceDropSound = () => {
     gainNode.connect(audioContext.destination);
     
     oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(880, audioContext.currentTime); 
-    oscillator.frequency.exponentialRampToValueAtTime(440, audioContext.currentTime + 0.3);
+    oscillator.frequency.setValueAtTime(880, audioContext.currentTime); // High pitch
+    oscillator.frequency.exponentialRampToValueAtTime(440, audioContext.currentTime + 0.5);
     
     gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.3);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.5);
     
     oscillator.start();
-    oscillator.stop(audioContext.currentTime + 0.3);
+    oscillator.stop(audioContext.currentTime + 0.5);
   } catch (e) {
     console.error("Audio play failed", e);
   }
 };
 
-// Som 2: OFERTA! (Preço <= Alvo) - Som duplo vitorioso (Ding-Ding)
-const playDealSound = () => {
-  try {
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    
-    const now = audioContext.currentTime;
-
-    // Nota 1 (Aguda)
-    const osc1 = audioContext.createOscillator();
-    const gain1 = audioContext.createGain();
-    osc1.connect(gain1);
-    gain1.connect(audioContext.destination);
-    
-    osc1.type = 'square'; // Timbre mais "digital" e chamativo
-    osc1.frequency.setValueAtTime(523.25, now); // C5
-    gain1.gain.setValueAtTime(0.05, now);
-    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-    osc1.start(now);
-    osc1.stop(now + 0.1);
-
-    // Nota 2 (Mais aguda ainda)
-    const osc2 = audioContext.createOscillator();
-    const gain2 = audioContext.createGain();
-    osc2.connect(gain2);
-    gain2.connect(audioContext.destination);
-    
-    osc2.type = 'square';
-    osc2.frequency.setValueAtTime(1046.50, now + 0.15); // C6
-    gain2.gain.setValueAtTime(0.05, now + 0.15);
-    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
-    osc2.start(now + 0.15);
-    osc2.stop(now + 0.6);
-
-  } catch (e) {
-    console.error("Audio play failed", e);
-  }
-};
-
-// Configurações restauradas (Reversão)
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; // 2 Minutes
-const SAFETY_DELAY_MS = 2000; // 2s de delay entre lotes (Mais seguro)
-const BATCH_SIZE = 2; // Processa 2 por vez (Mais rápido)
-const WATCHDOG_TIMEOUT_MS = 30000; // 30s: Se travar, o watchdog reseta
+const SAFETY_DELAY_MS = 5000; // 5 Seconds safety delay between requests (matches Google Sheets)
 
 const App: React.FC = () => {
   // -- State --
+  // Initial load is now empty until we fetch from server
   const [items, setItems] = useState<Item[]>(MOCK_ITEMS);
   const [settings, setSettings] = useState<Settings>(INITIAL_SETTINGS);
   const [dataLoaded, setDataLoaded] = useState(false);
@@ -102,8 +59,11 @@ const App: React.FC = () => {
   const [tempSettings, setTempSettings] = useState<Settings>(settings);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'saving' | 'error'>('idle');
 
+  // Inicia como TRUE (Automático)
   const [isRunning, setIsRunning] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
+  
+  // Estado para indicar visualmente se está no horário de pausa (apenas visual)
   const [isNightPause, setIsNightPause] = useState(false);
 
   // Inputs for New Item
@@ -117,18 +77,16 @@ const App: React.FC = () => {
   const isRunningRef = useRef(isRunning);
   const itemsRef = useRef(items);
   const settingsRef = useRef(settings);
-  
-  // Controle de concorrência e Watchdog
   const processingRef = useRef(false);
-  const processingStartTimeRef = useRef<number>(0);
   const lastFetchTimeRef = useRef<number>(0);
-  
   const saveTimeoutRef = useRef<number | null>(null);
 
   // Sync refs with state
   useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
   
-  // -- DATA PERSISTENCE --
+  // -- DATA PERSISTENCE (SERVER SIDE) --
+  
+  // 1. Load Data on Mount
   useEffect(() => {
     const loadFromServer = async () => {
       try {
@@ -154,9 +112,16 @@ const App: React.FC = () => {
     loadFromServer();
   }, []);
 
+  // 2. Save Data function (Debounced)
   const saveDataToServer = useCallback((newItems: Item[], newSettings: Settings) => {
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    // Clear existing timeout to debounce
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
     setSaveStatus('saving');
+
+    // Debounce save (wait 1s after last change before sending to server)
     saveTimeoutRef.current = window.setTimeout(async () => {
       try {
         await fetch('/api/db', {
@@ -173,106 +138,104 @@ const App: React.FC = () => {
     }, 1000);
   }, []);
 
+  // Monitor changes and save
   useEffect(() => {
-    if (!dataLoaded) return;
+    if (!dataLoaded) return; // Don't save before initial load
     itemsRef.current = items;
     saveDataToServer(items, settings);
   }, [items, settings, dataLoaded, saveDataToServer]);
 
 
   // -- Sorting Logic --
+  // Priority: 
+  // 1. Unseen Events (Deal OR Price Drop)
+  // 2. Active Deal (Seen)
+  // 3. Others
   const getSortedItems = useCallback((currentItems: Item[]) => {
     return [...currentItems].sort((a, b) => {
       const aIsDeal = a.lastPrice !== null && a.lastPrice > 0 && a.lastPrice <= a.targetPrice;
       const bIsDeal = b.lastPrice !== null && b.lastPrice > 0 && b.lastPrice <= b.targetPrice;
       
-      const aActive = (aIsDeal || a.hasPriceDrop) && !a.isAck;
-      const bActive = (bIsDeal || b.hasPriceDrop) && !b.isAck;
+      const aIsEvent = aIsDeal || a.hasPriceDrop;
+      const bIsEvent = bIsDeal || b.hasPriceDrop;
 
-      // 1. Prioridade para alertas ativos (piscando)
-      if (aActive && !bActive) return -1;
-      if (!aActive && bActive) return 1;
+      const aUnseen = aIsEvent && !a.isAck;
+      const bUnseen = bIsEvent && !b.isAck;
 
-      // 2. Data de atualização
-      const timeA = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
-      const timeB = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
+      // 1. Unseen Events (Piscando) - Topo Absoluto
+      if (aUnseen && !bUnseen) return -1;
+      if (!aUnseen && bUnseen) return 1;
 
-      return timeB - timeA; 
+      // 2. Active Deals (Vistos)
+      if (aIsDeal && !bIsDeal) return -1;
+      if (!aIsDeal && bIsDeal) return 1;
+      
+      // 3. Price Drop (Vistos mas não são deals)
+      if (a.hasPriceDrop && !b.hasPriceDrop) return -1;
+      if (!a.hasPriceDrop && b.hasPriceDrop) return 1;
+
+      return 0; 
     });
   }, []);
 
   // -- Automation Loop --
   useEffect(() => {
     const intervalId = setInterval(async () => {
+      // 1. Checagem de Pausa Manual
       if (!isRunningRef.current) {
         setIsNightPause(false); 
         return;
       }
 
-      // Pausa noturna
+      // 2. Checagem de Horário (01:00 as 08:00)
       const currentHour = new Date().getHours();
       const isSleepTime = currentHour >= 1 && currentHour < 8;
-      setIsNightPause(isSleepTime);
-      if (isSleepTime) return;
 
-      // WATCHDOG: Se estiver processando há muito tempo (>30s), destrava
-      if (processingRef.current) {
-        if (Date.now() - processingStartTimeRef.current > WATCHDOG_TIMEOUT_MS) {
-           console.warn("⚠️ Watchdog: Processamento travado detectado. Reiniciando fila.");
-           processingRef.current = false;
-        }
+      setIsNightPause(isSleepTime);
+
+      if (isSleepTime) {
         return;
       }
 
+      if (processingRef.current) return;
+
       const now = Date.now();
-      if (now - lastFetchTimeRef.current < SAFETY_DELAY_MS) return; 
+      if (now - lastFetchTimeRef.current < SAFETY_DELAY_MS) {
+        return; 
+      }
 
       const currentItems = itemsRef.current;
       
-      // Busca candidatos (LOTE de tamanho BATCH_SIZE)
-      const candidates = currentItems
-        .filter(i => i.nextUpdate <= now && i.status !== Status.LOADING)
-        .slice(0, BATCH_SIZE);
+      const candidate = currentItems.find(i => i.nextUpdate <= now && i.status !== Status.LOADING);
 
-      if (candidates.length > 0) {
+      if (candidate) {
         processingRef.current = true;
-        processingStartTimeRef.current = Date.now();
         
-        // Marca como LOADING
-        const candidateIds = candidates.map(c => c.id);
-        setItems(prev => prev.map(i => candidateIds.includes(i.id) ? { ...i, status: Status.LOADING } : i));
+        setItems(prev => prev.map(i => i.id === candidate.id ? { ...i, status: Status.LOADING } : i));
 
         try {
-          // Dispara requisições em paralelo (Promise.all)
-          const promises = candidates.map(candidate => 
-             fetchPrice(
-                candidate.name, 
-                settingsRef.current.cookie,
-                settingsRef.current.useProxy,
-                settingsRef.current.proxyUrl
-              ).then(result => ({ candidateId: candidate.id, result }))
+          const result = await fetchPrice(
+            candidate.name, 
+            settingsRef.current.cookie,
+            settingsRef.current.useProxy,
+            settingsRef.current.proxyUrl
           );
 
-          const results = await Promise.all(promises);
           lastFetchTimeRef.current = Date.now();
 
           setItems(prev => {
-            let foundDeal = false;
-            let foundDrop = false;
-
             const updatedList = prev.map(i => {
-              const resObj = results.find(r => r.candidateId === i.id);
-              if (!resObj) return i;
+              if (i.id !== candidate.id) return i;
 
-              const result = resObj.result;
               const isSuccess = result.success;
               const newPrice = result.price;
               const oldPrice = i.lastPrice;
               
-              // Verifica se é oferta (Deal)
+              // 1. Detecta Deal (Abaixo do alvo)
               const isDeal = isSuccess && newPrice !== null && newPrice > 0 && newPrice <= i.targetPrice;
               
-              // Verifica se houve queda (Drop)
+              // 2. Detecta Queda de Preço (Independente do alvo)
+              // Deve ser válida (maior que 0) e menor que o preço anterior conhecido
               const isPriceDrop = isSuccess && 
                                   newPrice !== null && 
                                   oldPrice !== null && 
@@ -280,15 +243,12 @@ const App: React.FC = () => {
                                   oldPrice > 0 && 
                                   newPrice < oldPrice;
 
-              if (isDeal) foundDeal = true;
-              else if (isPriceDrop) foundDrop = true;
+              // Aciona alerta se for Deal OU Queda de Preço
+              if (isDeal || isPriceDrop) {
+                playAlertSound();
+              }
 
               const shouldAlert = isDeal || isPriceDrop;
-
-              // Próximo update em 2 min (sucesso) ou 30s (erro)
-              const nextTime = isSuccess 
-                 ? Date.now() + UPDATE_INTERVAL_MS 
-                 : Date.now() + 30000; 
 
               return {
                 ...i,
@@ -296,31 +256,23 @@ const App: React.FC = () => {
                 lastUpdated: new Date().toISOString(),
                 status: isSuccess ? (newPrice === 0 ? Status.ALERTA : Status.OK) : Status.ERRO,
                 message: result.error || undefined,
-                nextUpdate: nextTime,
-                isAck: shouldAlert ? false : i.isAck,
-                hasPriceDrop: isPriceDrop ? true : (isSuccess ? false : i.hasPriceDrop)
+                nextUpdate: Date.now() + UPDATE_INTERVAL_MS,
+                isAck: shouldAlert ? false : i.isAck, // Reseta o visto se houver novidade
+                hasPriceDrop: isPriceDrop ? true : (isSuccess ? false : i.hasPriceDrop) // Reseta flag se atualizou com sucesso e preço subiu/igual, mantem se erro
               };
             });
-
-            // Lógica de Som Diferenciada
-            if (foundDeal) {
-                playDealSound(); // Som Especial!
-            } else if (foundDrop) {
-                playPriceDropSound(); // Som Comum
-            }
             
             return updatedList; 
           });
 
         } catch (e) {
-          console.error("Erro no lote:", e);
-          // Libera o lote em caso de erro fatal
-          setItems(prev => prev.map(i => candidateIds.includes(i.id) ? { ...i, status: Status.ERRO, nextUpdate: Date.now() + 60000 } : i));
+          console.error(e);
+          setItems(prev => prev.map(i => i.id === candidate.id ? { ...i, status: Status.ERRO, nextUpdate: Date.now() + UPDATE_INTERVAL_MS } : i));
         } finally {
           processingRef.current = false;
         }
       }
-    }, 1000); // Check loop a cada 1s
+    }, 1000);
 
     return () => clearInterval(intervalId);
   }, []);
@@ -334,23 +286,9 @@ const App: React.FC = () => {
     setSettings(tempSettings);
   };
 
-  const parseKkInput = (val: string): number => {
-    let numStr = val.toLowerCase().replace(/\s/g, '').replace(',', '.');
-    let multiplier = 1;
-    if (numStr.endsWith('kk')) {
-      multiplier = 1000000;
-      numStr = numStr.replace('kk', '');
-    } else if (numStr.endsWith('k')) {
-      multiplier = 1000;
-      numStr = numStr.replace('k', '');
-    }
-    const num = parseFloat(numStr);
-    return isNaN(num) ? 0 : Math.floor(num * multiplier);
-  };
-
   const addNewItem = () => {
     if (!newItemName.trim()) return;
-    const target = parseKkInput(newItemTarget) || 1000000;
+    const target = parseInt(newItemTarget.replace(/\D/g, '')) || 1000000;
 
     const newItem: Item = {
       id: Date.now().toString(),
@@ -385,31 +323,17 @@ const App: React.FC = () => {
   };
 
   const acknowledgeItem = (id: string) => {
+    // Ao clicar no olho, marcamos como visto e removemos a flag de queda de preço visual
     setItems(prev => prev.map(i => i.id === id ? { ...i, isAck: true, hasPriceDrop: false } : i));
-  };
-
-  const acknowledgeAll = () => {
-    if (confirm("Marcar todos os alertas como vistos?")) {
-      setItems(prev => prev.map(i => ({ ...i, isAck: true, hasPriceDrop: false })));
-    }
   };
 
   // -- Helpers --
   const formatMoney = (val: number | null) => {
     if (val === null) return '--';
-    if (val >= 1000000) {
-       const inMillions = val / 1000000;
-       return inMillions.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + 'kk';
-    }
-    if (val >= 1000) {
-       const inThousands = val / 1000;
-       return inThousands.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + 'k';
-    }
-    return val.toLocaleString('pt-BR'); 
+    return val.toLocaleString('pt-BR', { minimumFractionDigits: 0 }); 
   };
 
   const sortedItems = getSortedItems(items);
-  const activeAlertsCount = items.filter(i => ((i.lastPrice && i.lastPrice <= i.targetPrice) || i.hasPriceDrop) && !i.isAck).length;
 
   if (!dataLoaded) {
     return (
@@ -425,20 +349,25 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#0d1117] text-slate-200 p-4 md:p-8 font-sans relative">
       
+      {/* CSS for Pulse Animations */}
       <style>{`
         @keyframes pulse-green {
           0% { background-color: rgba(16, 185, 129, 0.05); border-color: rgba(16, 185, 129, 0.4); box-shadow: 0 0 0 rgba(16, 185, 129, 0); }
           50% { background-color: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 1); box-shadow: 0 0 20px rgba(16, 185, 129, 0.3); }
           100% { background-color: rgba(16, 185, 129, 0.05); border-color: rgba(16, 185, 129, 0.4); box-shadow: 0 0 0 rgba(16, 185, 129, 0); }
         }
-        .animate-pulse-green { animation: pulse-green 1.5s infinite; }
+        .animate-pulse-green {
+          animation: pulse-green 1.5s infinite;
+        }
         
         @keyframes pulse-blue {
           0% { background-color: rgba(59, 130, 246, 0.05); border-color: rgba(59, 130, 246, 0.4); }
           50% { background-color: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 1); box-shadow: 0 0 20px rgba(59, 130, 246, 0.3); }
           100% { background-color: rgba(59, 130, 246, 0.05); border-color: rgba(59, 130, 246, 0.4); }
         }
-        .animate-pulse-blue { animation: pulse-blue 1.5s infinite; }
+        .animate-pulse-blue {
+          animation: pulse-blue 1.5s infinite;
+        }
       `}</style>
 
       {/* MODAL DE EDIÇÃO */}
@@ -448,6 +377,7 @@ const App: React.FC = () => {
             <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
               <Edit2 size={20} className="text-blue-500" /> Editar Item
             </h3>
+            
             <div className="space-y-4">
               <div>
                 <label className="block text-xs text-slate-500 mb-1 font-mono">NOME DO ITEM</label>
@@ -458,29 +388,30 @@ const App: React.FC = () => {
                   className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-2 text-white focus:border-blue-500 outline-none"
                 />
               </div>
+              
               <div>
                 <label className="block text-xs text-slate-500 mb-1 font-mono">PREÇO ALVO</label>
                 <input 
-                  type="text" 
-                  value={formatMoney(editingItem.targetPrice).replace('z','')}
-                  onChange={(e) => {
-                     const val = parseKkInput(e.target.value);
-                     setEditingItem({...editingItem, targetPrice: val});
-                  }}
-                  placeholder="Ex: 1kk"
+                  type="number" 
+                  value={editingItem.targetPrice}
+                  onChange={(e) => setEditingItem({...editingItem, targetPrice: parseInt(e.target.value) || 0})}
                   className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-2 text-white focus:border-blue-500 outline-none"
                 />
-                <span className="text-[10px] text-slate-500">Valor real: {editingItem.targetPrice.toLocaleString()} z</span>
               </div>
+
               <div className="flex justify-end gap-3 mt-6">
                 <button 
                   onClick={() => setEditingItem(null)}
                   className="px-4 py-2 rounded text-slate-400 hover:text-white hover:bg-[#30363d] transition"
-                >Cancelar</button>
+                >
+                  Cancelar
+                </button>
                 <button 
                   onClick={saveEdit}
                   className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded font-medium shadow-lg transition"
-                >Salvar Alterações</button>
+                >
+                  Salvar Alterações
+                </button>
               </div>
             </div>
           </div>
@@ -495,7 +426,7 @@ const App: React.FC = () => {
             Ragnarok Market Tracker
           </h1>
           <div className="flex flex-wrap items-center gap-3 mt-1">
-             <p className="text-xs text-slate-500">Atualização em Lote (2 itens / 2s)</p>
+             <p className="text-xs text-slate-500">Atualização a cada 2 minutos</p>
              
              {isRunning && isNightPause && (
                <span className="flex items-center gap-1 text-[10px] bg-yellow-500/10 text-yellow-500 border border-yellow-500/30 px-2 py-0.5 rounded font-medium">
@@ -515,21 +446,12 @@ const App: React.FC = () => {
           </div>
         </div>
         
-        <div className="flex gap-3 items-center">
-          {activeAlertsCount > 0 && (
-             <button
-               onClick={acknowledgeAll}
-               className="px-4 py-2 rounded text-white bg-blue-600 hover:bg-blue-500 border border-blue-500 transition flex items-center gap-2 text-sm shadow-lg animate-pulse"
-             >
-               <ListChecks size={16} /> Marcar Todos ({activeAlertsCount})
-             </button>
-          )}
-
+        <div className="flex gap-3">
           <button 
             onClick={() => setShowSettings(!showSettings)}
             className={`px-4 py-2 rounded text-slate-200 border transition flex items-center gap-2 text-sm ${showSettings ? 'bg-[#1e293b] border-blue-500' : 'bg-[#161b22] border-[#30363d] hover:bg-[#21262d]'}`}
           >
-            <SettingsIcon size={16} /> Config
+            <SettingsIcon size={16} /> Configurações
           </button>
           
           <button 
@@ -548,7 +470,9 @@ const App: React.FC = () => {
       {/* Settings Panel */}
       {showSettings && (
         <div className="max-w-6xl mx-auto mb-6 bg-[#161b22] border border-[#30363d] rounded-lg p-6 animate-in fade-in slide-in-from-top-4 duration-300">
-          <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-wider flex items-center gap-2">Configurações de Acesso</h3>
+          <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-wider flex items-center gap-2">
+            Configurações de Acesso
+          </h3>
           <div className="grid gap-4">
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">Cookie de Sessão (Obrigatório)</label>
@@ -559,6 +483,7 @@ const App: React.FC = () => {
                 className="w-full bg-[#0d1117] border border-[#30363d] rounded p-2 text-sm focus:border-blue-500 outline-none font-mono text-slate-300 min-h-[80px]"
               />
             </div>
+            
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer select-none">
                  <input 
@@ -569,6 +494,7 @@ const App: React.FC = () => {
                  />
                  Usar Proxy (Opcional)
               </label>
+
               <button 
                 onClick={handleSaveSettings}
                 className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded text-sm font-medium transition flex items-center gap-2"
@@ -602,7 +528,7 @@ const App: React.FC = () => {
               type="text" 
               value={newItemTarget}
               onChange={(e) => setNewItemTarget(e.target.value)}
-              placeholder="Ex: 1kk"
+              placeholder="1000000"
               className="w-full bg-[#161b22] border border-[#30363d] rounded px-3 py-2 text-sm focus:border-blue-500 outline-none text-white placeholder-slate-600"
               onKeyDown={(e) => e.key === 'Enter' && addNewItem()}
             />
@@ -639,7 +565,7 @@ const App: React.FC = () => {
               // Evento Ativo = (Deal OU Price Drop) E ainda não "visto"
               const isActiveEvent = (isDeal || item.hasPriceDrop) && !item.isAck;
 
-              // Animação persistente se o evento for ativo
+              // Determina a classe de animação baseada no tipo de evento
               let rowClass = "hover:bg-[#1c2128] border-l-transparent bg-[#161b22]";
               
               if (isActiveEvent) {
@@ -671,7 +597,7 @@ const App: React.FC = () => {
 
                   {/* Target Price */}
                   <div className="col-span-2 font-mono text-slate-500 text-sm text-right pr-4">
-                    {formatMoney(item.targetPrice)}
+                    {formatMoney(item.targetPrice)} z
                   </div>
 
                   {/* Current Price */}
@@ -681,7 +607,7 @@ const App: React.FC = () => {
                          <div className="flex items-center gap-1">
                            {item.hasPriceDrop && <TrendingDown size={14} className="text-blue-500 animate-bounce" />}
                            <span className={`font-mono font-bold text-lg ${isDeal ? 'text-emerald-400' : (item.hasPriceDrop ? 'text-blue-400' : 'text-slate-200')}`}>
-                             {formatMoney(item.lastPrice)}
+                             {formatMoney(item.lastPrice)} z
                            </span>
                          </div>
                        </div>
@@ -702,7 +628,7 @@ const App: React.FC = () => {
                   {/* Actions */}
                   <div className="col-span-2 flex justify-end gap-2 items-center">
                     
-                    {/* Check Button for Active Events */}
+                    {/* Check Button for Active Events (Deals or Drops) */}
                     {isActiveEvent && (
                       <button 
                         onClick={() => acknowledgeItem(item.id)}

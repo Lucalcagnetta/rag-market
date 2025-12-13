@@ -122,7 +122,7 @@ app.get('/api/search', async (req, res) => {
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s timeout (Restaurado)
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
     const response = await fetch(targetUrl, { 
       method: 'GET', 
@@ -167,11 +167,7 @@ app.get('/api/search', async (req, res) => {
 
     if (match1) {
         const val = parsePriceString(match1[1]);
-        
-        // FILTROS CRÍTICOS
-        if (val === 20000000) { /* Ignora saldo de 20kk */ }
-        else if (val >= 2023 && val <= 2026) { /* Ignora anos */ }
-        else if (val > 100 && val < 1000000000) {
+        if (val > 100 && val < 1000000000) {
              console.log(`[SUCESSO M1] ${item}: ${val}`);
              return res.json({ success: true, price: val });
         }
@@ -191,11 +187,8 @@ app.get('/api/search', async (req, res) => {
         
         // Filtros válidos
         if (!isNaN(val) && val > 100 && val < 1000000000) {
-            // Ignora o saldo de 20kk (Valor fixo no header do site)
-            if (val === 20000000) continue;
-
             // Ignora anos (regras do GAS)
-            if (val !== 2023 && val !== 2024 && val !== 2025 && val !== 2026) {
+            if (val !== 2024 && val !== 2025) {
                 if (val < minPrice) {
                     minPrice = val;
                     found = true;
@@ -227,4 +220,16 @@ app.get('/api/search', async (req, res) => {
     console.error(`[ERRO CRÍTICO] ${item}:`, error.message);
     return res.json({ success: false, price: null, error: error.toString() });
   }
+});
+
+app.get('*', (req, res) => {
+  if (fs.existsSync(join(distPath, 'index.html'))) {
+    res.sendFile(join(distPath, 'index.html'));
+  } else {
+    res.send('Backend Online. Frontend not built. Run "npm run build"');
+  }
+});
+
+app.listen(PORT, HOST, () => {
+  console.log(`Ragnarok Scraper rodando em http://${HOST}:${PORT}`);
 });
