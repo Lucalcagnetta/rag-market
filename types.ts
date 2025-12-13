@@ -24,6 +24,7 @@ export interface Settings {
   cookie: string;
   useProxy: boolean;
   proxyUrl: string;
+  isRunning: boolean; // Controle Global da Automação
 }
 
 export interface ScrapeResult {

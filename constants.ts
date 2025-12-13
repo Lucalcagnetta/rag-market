@@ -5,6 +5,7 @@ export const INITIAL_SETTINGS: Settings = {
   cookie: '', // Deixar vazio para forçar o usuário a configurar
   useProxy: false,
   proxyUrl: 'https://api.allorigins.win/raw?url=',
+  isRunning: true,
 };
 
 export const MOCK_ITEMS: Item[] = [
