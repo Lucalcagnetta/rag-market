@@ -402,20 +402,24 @@ const App: React.FC = () => {
                        </div>
                     </div>
                     
-                    <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
-                        <div className="text-right">
-                           <div className="text-[10px] text-slate-500">ALVO</div>
+                    <div className="flex items-center w-full md:w-auto justify-between md:justify-end">
+                        <div className="text-right w-24">
+                           <div className="text-[10px] text-slate-500 font-bold tracking-wider">ALVO</div>
                            <div className="font-mono text-slate-400">{formatMoney(item.targetPrice)}</div>
                         </div>
-                        <div className="text-right">
-                           <div className="text-[10px] text-slate-500">ATUAL</div>
+                        
+                        {/* SEPARADOR VERTICAL */}
+                        <div className="h-8 w-px bg-slate-700 mx-4"></div>
+
+                        <div className="text-right w-28">
+                           <div className="text-[10px] text-slate-500 font-bold tracking-wider">ATUAL</div>
                            <div className={`font-mono text-lg font-bold ${isDeal ? 'text-emerald-400' : 'text-slate-200'}`}>
                              {formatMoney(item.lastPrice)}
                            </div>
                         </div>
                     </div>
 
-                    <div className="flex gap-2 w-full md:w-auto justify-center border-t border-slate-800 pt-2 md:pt-0 md:border-0">
+                    <div className="flex gap-2 w-full md:w-auto justify-center border-t border-slate-800 pt-2 md:pt-0 md:border-0 md:ml-4">
                        {isActiveEvent && (
                          <button onClick={() => acknowledgeItem(item.id)} className="bg-emerald-600 text-white p-2 rounded-full shadow-lg"><Eye size={16}/></button>
                        )}
