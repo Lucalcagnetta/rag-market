@@ -36,8 +36,14 @@ const App: React.FC = () => {
   const [showVolumeControl, setShowVolumeControl] = useState(false);
 
   // -- Calculator State --
-  const [calcPrice, setCalcPrice] = useState('');
+  // Inicializa lendo do localStorage, ou vazio se não existir
+  const [calcPrice, setCalcPrice] = useState(() => localStorage.getItem('ro_calc_price') || '');
   const [calcQty, setCalcQty] = useState('');
+
+  // Salva o preço no localStorage sempre que ele mudar
+  useEffect(() => {
+    localStorage.setItem('ro_calc_price', calcPrice);
+  }, [calcPrice]);
 
   // Local state for settings form
   const [tempSettings, setTempSettings] = useState<Settings>(settings);
