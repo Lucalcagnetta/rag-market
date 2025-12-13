@@ -307,6 +307,9 @@ const App: React.FC = () => {
            <h1 className="text-xl font-bold text-white flex items-center gap-2"><Activity className="text-blue-500"/> Ragnarok Cloud Tracker</h1>
            <div className="flex gap-2 mt-1">
              <span className="text-[10px] bg-slate-800 px-2 rounded border border-slate-700">Server-Side Auto</span>
+             <span className="text-[10px] bg-slate-800 px-2 rounded border border-slate-700 text-slate-400">
+               {items.length} {items.length === 1 ? 'Item' : 'Itens'}
+             </span>
              {saveStatus === 'saving' && <span className="text-[10px] text-blue-400">Sincronizando...</span>}
            </div>
         </div>
