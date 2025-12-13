@@ -285,7 +285,7 @@ const App: React.FC = () => {
                 className="w-full bg-[#0d1117] border border-[#30363d] rounded p-2 text-sm focus:border-blue-500 outline-none font-mono text-slate-300 min-h-[80px]"
               />
               <p className="text-[10px] text-slate-500 mt-1">
-                Acesse ro.gnjoylatam.com, faça login, abra o Console (F12) -> Network. Copie o valor de "Cookie" de qualquer requisição.
+                Acesse ro.gnjoylatam.com, faça login, abra o Console (F12) &rarr; Network. Copie o valor de "Cookie" de qualquer requisição.
               </p>
             </div>
             
