@@ -82,14 +82,21 @@ if (fs.existsSync(distPath)) {
 
 const parsePriceString = (str) => {
   if (!str) return NaN;
+  // Remove tudo que não é dígito
   const numericStr = str.replace(/[^\d]/g, '');
   return parseInt(numericStr, 10);
+};
+
+// Escapa string para regex
+const escapeRegExp = (string) => {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
 };
 
 const performScrape = async (item, cookie) => {
   let userCookie = cookie || ''; 
   if (userCookie) userCookie = userCookie.replace(/[\r\n]+/g, '').trim();
 
+  // A busca usa LIKE%, então precisamos ser espertos na filtragem do resultado
   const targetUrl = `https://ro.gnjoylatam.com/pt/intro/shop-search/trading?storeType=BUY&serverType=FREYA&searchWord=${encodeURIComponent(item)}`;
   
   try {
@@ -124,48 +131,69 @@ const performScrape = async (item, cookie) => {
         return { success: false, price: null, error: 'Precisa de novo Cookie' };
     }
 
-    // --- ESTRATÉGIA DE EXTRAÇÃO DE PREÇO ---
-    
-    // 1. TENTATIVA ESTRITA (Procura 'z' ou 'Zeny' junto do número)
-    // Isso é o ideal para evitar pegar Quantidade ou Datas.
-    const strictPriceRegex = />\s*([0-9]{1,3}(?:[.,\s]?[0-9]{3})*)\s*(?:z|Zeny)\s*</gi;
-    let matches = [...htmlText.matchAll(strictPriceRegex)];
-    let prices = [];
+    // --- ESTRATÉGIA DE EXTRAÇÃO DE PREÇO V3 (CONTEXTUAL) ---
+    // O problema anterior era: 
+    // V1 (Estrita): Falhava se o HTML não tivesse 'z' colado.
+    // V2 (Solta): Pegava preços de itens errados (ex: Fragmento custando 12kk quando buscava o Item de 300kk)
+    // V3 (Contextual): Busca o nome do item no HTML e procura um preço logo em seguida.
 
-    // Se encontrou com 'z', confiamos nesses valores
-    if (matches.length > 0) {
-        for (const m of matches) {
-            const val = parsePriceString(m[1]);
-            // Filtros básicos de sanidade
-            if (!isNaN(val) && val > 0 && val < 9999999999) {
-                 // Filtra placeholders de busca comum
-                 if (val === 20000000) continue; 
-                 prices.push(val);
-            }
-        }
-    } 
+    let prices = [];
     
-    // 2. FALLBACK (Se não achou com 'z', procura números soltos mas com filtro rigoroso)
-    // Alguns itens no site podem não ter o 'z' dentro da mesma tag HTML
+    // Divide o termo de busca em palavras para ser flexível (caso o HTML tenha tags no meio do nome)
+    // Mas para segurança máxima contra "Fragmento de X", tentamos achar o nome completo primeiro.
+    
+    // Normaliza para facilitar busca
+    const lowerHtml = htmlText.toLowerCase();
+    const lowerItem = item.toLowerCase();
+    
+    // Encontra todas as posições onde o nome do item aparece
+    let searchIndex = 0;
+    const foundIndices = [];
+    while (true) {
+        const idx = lowerHtml.indexOf(lowerItem, searchIndex);
+        if (idx === -1) break;
+        foundIndices.push(idx);
+        searchIndex = idx + 1;
+    }
+
+    // Regex para pegar preço (Generosa, pois já temos o contexto)
+    // Procura > NÚMERO <
+    const priceRegex = />\s*([0-9]{1,3}(?:[.,]?[0-9]{3})*)\s*(?:z|Zeny)?\s*</i;
+
+    if (foundIndices.length > 0) {
+        // Para cada ocorrência do nome, olha os próximos 1500 caracteres (suficiente para cobrir a linha da tabela)
+        for (const idx of foundIndices) {
+             const contextChunk = htmlText.substring(idx, idx + 1500);
+             
+             // Aplica a regex no chunk
+             const match = contextChunk.match(priceRegex);
+             if (match) {
+                 const val = parsePriceString(match[1]);
+                 if (!isNaN(val)) {
+                     // Filtros de sanidade
+                     if (val >= 2023 && val <= 2030) continue; // Anos
+                     if (val < 500) continue; // Qtd pequena
+                     if (val === 20000000) continue; // Placeholder
+                     
+                     prices.push(val);
+                 }
+             }
+        }
+    }
+
+    // Se a busca contextual falhou (talvez o nome esteja quebrado por HTML tags <b>Nome</b>),
+    // Tentamos o fallback Global (V2), mas com mais rigor.
     if (prices.length === 0) {
-        const loosePriceRegex = />\s*([0-9]{1,3}(?:[.,\s]?[0-9]{3})*)\s*</gi;
-        matches = [...htmlText.matchAll(loosePriceRegex)];
+        // Regex V2 (Solta Global)
+        const loosePriceRegex = />\s*([0-9]{1,3}(?:[.,]?[0-9]{3})*)\s*(?:z|Zeny)?\s*</gi;
+        const matches = [...htmlText.matchAll(loosePriceRegex)];
         
         for (const m of matches) {
             const val = parsePriceString(m[1]);
             if (!isNaN(val)) {
-                // FILTROS RIGOROSOS PARA O FALLBACK:
-                
-                // 1. Ignora anos atuais/próximos (evita datas de postagem)
                 if (val >= 2023 && val <= 2030) continue;
-                
-                // 2. Ignora quantidades pequenas (assumimos que ninguém rastreia itens de < 500z)
-                // A maioria das quantidades é 1, 5, 10, 50, 100.
                 if (val < 500) continue;
-
-                // 3. Ignora placeholders conhecidos
                 if (val === 20000000) continue;
-
                 prices.push(val);
             }
         }
@@ -209,9 +237,6 @@ app.post('/api/db', (req, res) => {
         if (existing && existing._loadingStart) {
             return { ...newItem, _loadingStart: existing._loadingStart };
         }
-        // Se o frontend mandar algo antigo, preservamos o estado do backend se for mais recente?
-        // Difícil sincronizar sem complexidade. Vamos confiar no array do frontend para ADD/REMOVE,
-        // mas as rotas de ACK abaixo evitam o problema de sobrescrita de status.
         return newItem;
     });
 
