@@ -39,6 +39,7 @@ const playAlertSound = () => {
 };
 
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; // 2 Minutes
+const SAFETY_DELAY_MS = 5000; // 5 Seconds safety delay between requests (matches Google Sheets)
 
 const App: React.FC = () => {
   // -- State --
@@ -68,6 +69,7 @@ const App: React.FC = () => {
   const itemsRef = useRef(items);
   const settingsRef = useRef(settings);
   const processingRef = useRef(false);
+  const lastFetchTimeRef = useRef<number>(0);
 
   // Sync refs with state
   useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
@@ -101,7 +103,12 @@ const App: React.FC = () => {
     const intervalId = setInterval(async () => {
       if (!isRunningRef.current || processingRef.current) return;
 
+      // Enforce safety delay between ANY request (Global Throttle)
       const now = Date.now();
+      if (now - lastFetchTimeRef.current < SAFETY_DELAY_MS) {
+        return; 
+      }
+
       const currentItems = itemsRef.current;
       
       // Find one item that needs update
@@ -122,6 +129,9 @@ const App: React.FC = () => {
             settingsRef.current.useProxy,
             settingsRef.current.proxyUrl
           );
+
+          // Update timestamp for throttle
+          lastFetchTimeRef.current = Date.now();
 
           setItems(prev => {
             const updatedList = prev.map(i => {
