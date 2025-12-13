@@ -15,8 +15,9 @@ import {
   CheckCircle2,
   X,
   Eye,
-  EyeOff,
-  Database
+  Database,
+  Moon,
+  Sun
 } from 'lucide-react';
 
 // Simple notification sound (beep)
@@ -57,9 +58,13 @@ const App: React.FC = () => {
   const [tempSettings, setTempSettings] = useState<Settings>(settings);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'saving' | 'error'>('idle');
 
-  const [isRunning, setIsRunning] = useState(false);
+  // Inicia como TRUE (Automático)
+  const [isRunning, setIsRunning] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   
+  // Estado para indicar visualmente se está no horário de pausa (apenas visual)
+  const [isNightPause, setIsNightPause] = useState(false);
+
   // Inputs for New Item
   const [newItemName, setNewItemName] = useState('');
   const [newItemTarget, setNewItemTarget] = useState<string>('');
@@ -170,7 +175,26 @@ const App: React.FC = () => {
   // -- Automation Loop --
   useEffect(() => {
     const intervalId = setInterval(async () => {
-      if (!isRunningRef.current || processingRef.current) return;
+      // 1. Checagem de Pausa Manual (Botão do Usuário)
+      if (!isRunningRef.current) {
+        setIsNightPause(false); 
+        return;
+      }
+
+      // 2. Checagem de Horário (01:00 as 08:00)
+      const currentHour = new Date().getHours();
+      // Pausa se for maior ou igual a 1 AM E menor que 8 AM
+      const isSleepTime = currentHour >= 1 && currentHour < 8;
+
+      // Atualiza estado visual
+      setIsNightPause(isSleepTime);
+
+      if (isSleepTime) {
+        // Se estiver no horário de dormir, não faz nada, apenas retorna
+        return;
+      }
+
+      if (processingRef.current) return;
 
       const now = Date.now();
       if (now - lastFetchTimeRef.current < SAFETY_DELAY_MS) {
@@ -380,8 +404,23 @@ const App: React.FC = () => {
             <Activity className="text-blue-500" />
             Ragnarok Market Tracker
           </h1>
-          <div className="flex items-center gap-2 mt-1">
-             <p className="text-xs text-slate-500">Atualização automática a cada 2 minutos</p>
+          <div className="flex flex-wrap items-center gap-3 mt-1">
+             <p className="text-xs text-slate-500">Atualização a cada 2 minutos</p>
+             
+             {/* Indicador de Pausa Noturna */}
+             {isRunning && isNightPause && (
+               <span className="flex items-center gap-1 text-[10px] bg-yellow-500/10 text-yellow-500 border border-yellow-500/30 px-2 py-0.5 rounded font-medium">
+                 <Moon size={10} /> Pausa Agendada (01h-08h)
+               </span>
+             )}
+             
+             {/* Indicador de Operação Normal */}
+             {isRunning && !isNightPause && (
+                <span className="flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-500 border border-emerald-500/30 px-2 py-0.5 rounded font-medium">
+                  <Sun size={10} /> Monitorando
+                </span>
+             )}
+
              {saveStatus === 'saving' && <span className="text-[10px] text-blue-400 flex items-center gap-1"><Database size={10} className="animate-bounce" /> Salvando...</span>}
              {saveStatus === 'saved' && <span className="text-[10px] text-emerald-500 flex items-center gap-1"><CheckCircle2 size={10} /> Sincronizado</span>}
              {saveStatus === 'error' && <span className="text-[10px] text-red-500 flex items-center gap-1"><X size={10} /> Erro ao salvar</span>}
