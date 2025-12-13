@@ -10,20 +10,13 @@ import {
   Settings as SettingsIcon, 
   Activity, 
   Edit2,
-  Save,
-  CheckCircle2,
-  X,
-  Eye,
-  Database,
-  Moon,
-  Sun,
-  TrendingDown,
   ListChecks,
-  Zap,
   Clock,
+  Eye,
+  RefreshCw,
+  Moon,
   Volume2,
-  VolumeX,
-  RefreshCw
+  VolumeX
 } from 'lucide-react';
 
 const SYNC_INTERVAL_MS = 2000; // Sincroniza com servidor a cada 2s
@@ -33,6 +26,13 @@ const App: React.FC = () => {
   const [items, setItems] = useState<Item[]>(MOCK_ITEMS);
   const [settings, setSettings] = useState<Settings>(INITIAL_SETTINGS);
   const [dataLoaded, setDataLoaded] = useState(false);
+
+  // -- Volume State (Persistente no LocalStorage) --
+  const [volume, setVolume] = useState<number>(() => {
+    const saved = localStorage.getItem('ro_volume');
+    return saved !== null ? parseFloat(saved) : 0.5;
+  });
+  const [showVolumeControl, setShowVolumeControl] = useState(false);
 
   // Local state for settings form
   const [tempSettings, setTempSettings] = useState<Settings>(settings);
@@ -50,7 +50,12 @@ const App: React.FC = () => {
 
   // -- Refs & Audio --
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const previousItemsRef = useRef<Item[]>([]); // Para detectar mudanças e tocar som
+  const previousItemsRef = useRef<Item[]>([]); 
+  
+  // -- FIX: Pending ACKs Ref --
+  // Armazena IDs que o usuário marcou como visto, mas o servidor ainda não confirmou.
+  // Isso evita que o polling do servidor sobrescreva o estado local e toque o som novamente.
+  const pendingAcksRef = useRef<Set<string>>(new Set());
   
   // -- AUDIO HELPERS --
   const initAudio = useCallback(() => {
@@ -64,7 +69,13 @@ const App: React.FC = () => {
     } catch (e) { console.error(e); }
   }, []);
 
-  // Unlock Audio on First Interaction (Corrige problema de som não sair em dispositivos passivos)
+  // Handle Volume Change
+  const handleVolumeChange = (newVol: number) => {
+      setVolume(newVol);
+      localStorage.setItem('ro_volume', newVol.toString());
+  };
+
+  // Unlock Audio on First Interaction
   useEffect(() => {
     const handleInteraction = () => {
         if (!audioCtxRef.current) {
@@ -72,7 +83,6 @@ const App: React.FC = () => {
         }
         if (audioCtxRef.current.state === 'suspended') {
             audioCtxRef.current.resume().then(() => {
-                // Remove listeners após desbloquear com sucesso
                 ['click', 'touchstart', 'keydown'].forEach(evt => 
                     window.removeEventListener(evt, handleInteraction)
                 );
@@ -92,6 +102,8 @@ const App: React.FC = () => {
   }, []);
 
   const playSound = useCallback((type: 'deal' | 'drop') => {
+    if (volume === 0) return; // Mudo
+
     try {
       if (!audioCtxRef.current) initAudio();
       const ctx = audioCtxRef.current;
@@ -101,44 +113,42 @@ const App: React.FC = () => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
 
-      // FORÇA ESTÉREO (L+R)
-      // Garante que o som saia nos dois lados mesmo se o dispositivo tratar mono de forma estranha
       const merger = ctx.createChannelMerger(2);
       
       osc.connect(gain);
-      // Conecta o ganho (mono) nas duas entradas do merger (Esquerda e Direita)
       gain.connect(merger, 0, 0); 
       gain.connect(merger, 0, 1);
       
       merger.connect(ctx.destination);
 
+      // Usa o volume do estado
+      const targetVol = volume; 
+
       if (type === 'deal') {
-        // SOM VERDE (SQUARE - Estridente)
+        // SOM VERDE
         osc.type = 'square';
         osc.frequency.setValueAtTime(523.25, now);
         osc.frequency.setValueAtTime(1046.50, now + 0.15);
         
-        // VOLUME 0.3
-        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.setValueAtTime(targetVol, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
         
         osc.start(now);
         osc.stop(now + 0.6);
       } else {
-        // SOM AZUL (TRIANGLE - Mais cheio e alto que sine)
+        // SOM AZUL
         osc.type = 'triangle';
         osc.frequency.setValueAtTime(880, now);
         osc.frequency.exponentialRampToValueAtTime(440, now + 0.3);
         
-        // VOLUME IGUALADO AO VERDE (0.3)
-        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.setValueAtTime(targetVol, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
         
         osc.start(now);
         osc.stop(now + 0.3);
       }
     } catch (e) { console.error(e); }
-  }, [initAudio]);
+  }, [initAudio, volume]);
 
   // -- API CLIENT --
   const saveData = useCallback(async (currentItems: Item[], currentSettings: Settings) => {
@@ -164,9 +174,26 @@ const App: React.FC = () => {
         const res = await fetch('/api/db');
         if (res.ok) {
           const data = await res.json();
-          // Se estamos editando, não atualiza a UI drasticamente para não pular o cursor
           if (!editingItem) {
-             setItems(data.items || []);
+             // Lógica de Fusão (Merge) para evitar Glitch de ACK
+             const mergedItems = (data.items || []).map((serverItem: Item) => {
+                 // Se este item está na nossa lista de "Aguardando Confirmação do Servidor"
+                 if (pendingAcksRef.current.has(serverItem.id)) {
+                     // Se o servidor JÁ marcou como visto, removemos da pendência
+                     if (serverItem.isAck) {
+                         pendingAcksRef.current.delete(serverItem.id);
+                         return serverItem;
+                     } 
+                     // Se o servidor AINDA NÃO marcou, forçamos o estado local como VISTO
+                     // para evitar que o som toque novamente
+                     else {
+                         return { ...serverItem, isAck: true, hasPriceDrop: false };
+                     }
+                 }
+                 return serverItem;
+             });
+
+             setItems(mergedItems);
              setSettings(data.settings || INITIAL_SETTINGS);
              
              if (!dataLoaded) {
@@ -178,7 +205,7 @@ const App: React.FC = () => {
       } catch (e) { console.error("Sync error", e); }
     };
 
-    fetchData(); // Immediate load
+    fetchData(); 
     const interval = setInterval(fetchData, SYNC_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [editingItem, dataLoaded]);
@@ -187,25 +214,21 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!dataLoaded) return;
     
-    // Compara o estado atual com o anterior para ver se houve novidade vinda do servidor
     const prevItems = previousItemsRef.current;
     
-    // Detecta novos DEALS ou DROPS que não estavam "ack" (vistos)
-    let triggeredSound = false;
-
     items.forEach(newItem => {
         const oldItem = prevItems.find(p => p.id === newItem.id);
         
-        // Se o servidor marcou como não visto (isAck = false) e antes estava visto (ou nem existia)
-        // Isso significa que o servidor acabou de detectar algo
+        // Só toca som se:
+        // 1. O item NÃO está visto (é um alerta ativo)
+        // 2. E (Ele era novo na lista OU ele JÁ estava visto antes OU ele mudou de timestamp)
+        // A lógica do pendingAcksRef acima garante que o newItem.isAck não reverta para false acidentalmente.
         if (!newItem.isAck && (oldItem?.isAck !== false)) {
             const isDeal = newItem.lastPrice && newItem.lastPrice <= newItem.targetPrice;
             if (isDeal) {
                 playSound('deal');
-                triggeredSound = true;
             } else if (newItem.hasPriceDrop) {
                 playSound('drop');
-                triggeredSound = true;
             }
         }
     });
@@ -224,7 +247,6 @@ const App: React.FC = () => {
 
   const handleSaveSettings = () => {
     initAudio();
-    // Preserva o isRunning atual ao salvar configurações do modal
     const mergedSettings = { ...tempSettings, isRunning: settings.isRunning };
     setSettings(mergedSettings);
     saveData(items, mergedSettings);
@@ -285,8 +307,6 @@ const App: React.FC = () => {
   };
 
   const resetItem = (id: string) => {
-      // Força um reset visual e lógico no item
-      // nextUpdate: 0 força o servidor a pegar este item IMEDIATAMENTE no próximo tick
       const newList = items.map(i => {
           if (i.id === id) {
               return { 
@@ -296,7 +316,7 @@ const App: React.FC = () => {
                   status: Status.IDLE, 
                   nextUpdate: 0,
                   message: undefined,
-                  isAck: true // Evita som desnecessário durante o reset
+                  isAck: true 
               };
           }
           return i;
@@ -307,11 +327,12 @@ const App: React.FC = () => {
 
   const acknowledgeAll = async () => {
     if (confirm("Marcar tudo como visto?")) {
-      // Otimista: atualiza UI
+      // Adiciona todos aos pendentes
+      items.forEach(i => pendingAcksRef.current.add(i.id));
+
       const newList = items.map(i => ({ ...i, isAck: true, hasPriceDrop: false }));
       setItems(newList);
       
-      // Envia comando seguro para o backend (não envia DB inteiro)
       try {
         await fetch('/api/ack-all', { method: 'POST' });
       } catch (e) {
@@ -321,11 +342,12 @@ const App: React.FC = () => {
   };
   
   const acknowledgeItem = async (id: string) => {
-      // Otimista: atualiza UI imediatamente
+      // Marca como pendente de confirmação do servidor
+      pendingAcksRef.current.add(id);
+
       const newList = items.map(i => i.id === id ? { ...i, isAck: true, hasPriceDrop: false } : i);
       setItems(newList);
 
-      // Envia comando seguro para o backend
       try {
           await fetch(`/api/ack/${id}`, { method: 'POST' });
       } catch (e) {
@@ -341,18 +363,15 @@ const App: React.FC = () => {
       setEditingItem(null);
   };
 
-  // Sorting for UI
   const sortedItems = [...items].sort((a, b) => {
       const aDeal = (a.lastPrice && a.lastPrice <= a.targetPrice) || a.hasPriceDrop;
       const bDeal = (b.lastPrice && b.lastPrice <= b.targetPrice) || b.hasPriceDrop;
       
-      // 1. Alertas ativos (não vistos) primeiro
       const aActive = aDeal && !a.isAck;
       const bActive = bDeal && !b.isAck;
       if (aActive && !bActive) return -1;
       if (!aActive && bActive) return 1;
       
-      // 2. Deals vistos
       if (aDeal && !bDeal) return -1;
       if (!aDeal && bDeal) return 1;
       
@@ -381,6 +400,25 @@ const App: React.FC = () => {
           100% { background-color: rgba(59, 130, 246, 0.05); border-color: rgba(59, 130, 246, 0.4); }
         }
         .animate-pulse-blue { animation: pulse-blue 1.5s infinite; }
+        
+        input[type=range] {
+          -webkit-appearance: none;
+          background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          height: 12px;
+          width: 12px;
+          border-radius: 50%;
+          background: #3b82f6;
+          margin-top: -4px;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+          width: 100%;
+          height: 4px;
+          background: #334155;
+          border-radius: 2px;
+        }
       `}</style>
 
       {/* HEADER */}
@@ -396,18 +434,41 @@ const App: React.FC = () => {
            </div>
         </div>
         
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
            {activeAlertsCount > 0 && (
-             <button onClick={acknowledgeAll} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs flex items-center gap-1 animate-pulse">
+             <button onClick={acknowledgeAll} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs flex items-center gap-1 animate-pulse mr-2">
                 <ListChecks size={14} /> Visto ({activeAlertsCount})
              </button>
            )}
-           <button onClick={() => setShowSettings(!showSettings)} className="bg-slate-800 border border-slate-700 p-2 rounded hover:bg-slate-700 transition">
+
+           {/* VOLUME CONTROL */}
+           <div className="relative group flex items-center bg-slate-800 border border-slate-700 rounded h-[38px] px-2 mr-2">
+              <button 
+                onClick={() => handleVolumeChange(volume === 0 ? 0.5 : 0)} 
+                className="text-slate-400 hover:text-white"
+                title="Volume do Alerta"
+              >
+                 {volume === 0 ? <VolumeX size={16}/> : <Volume2 size={16}/>}
+              </button>
+              <div className="w-0 overflow-hidden group-hover:w-24 transition-all duration-300 flex items-center ml-1">
+                 <input 
+                   type="range" 
+                   min="0" 
+                   max="1" 
+                   step="0.05" 
+                   value={volume} 
+                   onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                   className="w-20 cursor-pointer"
+                 />
+              </div>
+           </div>
+
+           <button onClick={() => setShowSettings(!showSettings)} className="bg-slate-800 border border-slate-700 p-2 rounded hover:bg-slate-700 transition h-[38px]">
               <SettingsIcon size={16} />
            </button>
            <button 
              onClick={toggleAutomation}
-             className={`px-4 py-2 rounded font-bold flex items-center gap-2 text-xs transition ${settings.isRunning ? 'bg-emerald-600 text-white' : 'bg-red-900/30 text-red-400 border border-red-800'}`}
+             className={`px-4 h-[38px] rounded font-bold flex items-center gap-2 text-xs transition ${settings.isRunning ? 'bg-emerald-600 text-white' : 'bg-red-900/30 text-red-400 border border-red-800'}`}
            >
              {settings.isRunning ? <><Pause size={14}/> ONLINE</> : <><Play size={14}/> PAUSADO</>}
            </button>
