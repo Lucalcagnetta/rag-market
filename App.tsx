@@ -288,7 +288,7 @@ const App: React.FC = () => {
 
   const addNewItem = () => {
     if (!newItemName.trim()) return;
-    const target = parseInt(newItemTarget.replace(/\D/g, '')) || 1000000;
+    const target = parseKkInput(newItemTarget) || 1000000;
 
     const newItem: Item = {
       id: Date.now().toString(),
@@ -328,9 +328,40 @@ const App: React.FC = () => {
   };
 
   // -- Helpers --
+  // Converte input com "k" ou "kk" para número (ex: 1kk -> 1000000)
+  const parseKkInput = (val: string): number => {
+    let numStr = val.toLowerCase().replace(/\s/g, '').replace(',', '.');
+    let multiplier = 1;
+    
+    if (numStr.endsWith('kk')) {
+      multiplier = 1000000;
+      numStr = numStr.replace('kk', '');
+    } else if (numStr.endsWith('k')) {
+      multiplier = 1000;
+      numStr = numStr.replace('k', '');
+    }
+    
+    const num = parseFloat(numStr);
+    return isNaN(num) ? 0 : Math.floor(num * multiplier);
+  };
+
   const formatMoney = (val: number | null) => {
     if (val === null) return '--';
-    return val.toLocaleString('pt-BR', { minimumFractionDigits: 0 }); 
+    
+    // Se for maior que 1 milhão, usa 'kk'
+    if (val >= 1000000) {
+       // Exibe até 2 casas decimais se necessário (ex: 1,5kk)
+       const inMillions = val / 1000000;
+       return inMillions.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + 'kk';
+    }
+    
+    // Se for maior que 1 mil, usa 'k'
+    if (val >= 1000) {
+       const inThousands = val / 1000;
+       return inThousands.toLocaleString('pt-BR', { maximumFractionDigits: 0 }) + 'k';
+    }
+
+    return val.toLocaleString('pt-BR'); 
   };
 
   const sortedItems = getSortedItems(items);
@@ -392,11 +423,23 @@ const App: React.FC = () => {
               <div>
                 <label className="block text-xs text-slate-500 mb-1 font-mono">PREÇO ALVO</label>
                 <input 
-                  type="number" 
-                  value={editingItem.targetPrice}
-                  onChange={(e) => setEditingItem({...editingItem, targetPrice: parseInt(e.target.value) || 0})}
+                  type="text" 
+                  value={formatMoney(editingItem.targetPrice)} // Mostra formatado, mas usuário pode editar
+                  onChange={(e) => {
+                     // Lógica simples para permitir edição, na prática seria melhor um componente separado
+                     // Aqui apenas removemos caracteres não numéricos para o estado
+                     const val = parseKkInput(e.target.value);
+                     setEditingItem({...editingItem, targetPrice: val});
+                  }}
+                  onBlur={(e) => {
+                      // Ao sair, podemos tentar interpretar k/kk
+                      const val = parseKkInput(e.target.value);
+                      if (val > 0) setEditingItem({...editingItem, targetPrice: val});
+                  }}
+                  placeholder="Ex: 1kk"
                   className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-2 text-white focus:border-blue-500 outline-none"
                 />
+                <span className="text-[10px] text-slate-500">Valor real: {editingItem.targetPrice.toLocaleString()} z</span>
               </div>
 
               <div className="flex justify-end gap-3 mt-6">
@@ -528,7 +571,7 @@ const App: React.FC = () => {
               type="text" 
               value={newItemTarget}
               onChange={(e) => setNewItemTarget(e.target.value)}
-              placeholder="1000000"
+              placeholder="Ex: 1kk"
               className="w-full bg-[#161b22] border border-[#30363d] rounded px-3 py-2 text-sm focus:border-blue-500 outline-none text-white placeholder-slate-600"
               onKeyDown={(e) => e.key === 'Enter' && addNewItem()}
             />
@@ -597,7 +640,7 @@ const App: React.FC = () => {
 
                   {/* Target Price */}
                   <div className="col-span-2 font-mono text-slate-500 text-sm text-right pr-4">
-                    {formatMoney(item.targetPrice)} z
+                    {formatMoney(item.targetPrice)}
                   </div>
 
                   {/* Current Price */}
@@ -607,7 +650,7 @@ const App: React.FC = () => {
                          <div className="flex items-center gap-1">
                            {item.hasPriceDrop && <TrendingDown size={14} className="text-blue-500 animate-bounce" />}
                            <span className={`font-mono font-bold text-lg ${isDeal ? 'text-emerald-400' : (item.hasPriceDrop ? 'text-blue-400' : 'text-slate-200')}`}>
-                             {formatMoney(item.lastPrice)} z
+                             {formatMoney(item.lastPrice)}
                            </span>
                          </div>
                        </div>

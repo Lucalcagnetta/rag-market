@@ -169,7 +169,6 @@ app.get('/api/search', async (req, res) => {
     // 1. Procura sequência numérica (ex: 100, 1.000, 1.500.000)
     // 2. Permite opcionalmente tags HTML entre o número e o 'z' (ex: <span>1.000</span><span>z</span>)
     // 3. Exige a presença da letra 'z' ou 'Z' no final para confirmar que é moeda.
-    // Isso evita pegar números aleatórios da página (como IDs, versões, contadores)
     const priceRegex = /([0-9]{1,3}(?:[.,][0-9]{3})*)\s*(?:<[^>]+>\s*)*z/gi;
     
     const matches = [...htmlText.matchAll(priceRegex)];
@@ -184,8 +183,13 @@ app.get('/api/search', async (req, res) => {
          if (isNaN(val)) return false;
          // Filtro de segurança: menor que 100z é provavelmente erro/quantidade
          if (val < 100) return false;
-         // Filtro de segurança: maior que 4bi é provavelmente erro (limite do jogo é ~2.1bi, mas vendas podem exceder em logs antigos?) 
-         // Vamos manter 2.5bi por segurança
+         
+         // FILTRO ESPECÍFICO PARA O BUG DOS 20KK
+         // O valor 20.000.000 aparece com frequência como "Limite de busca" ou "Saldo" na interface
+         // Se este valor exato aparecer, ignoramos para evitar falsos positivos
+         if (val === 20000000) return false; 
+
+         // Filtro de segurança: maior que 4bi é provavelmente erro 
          if (val > 2500000000) return false;
          // Filtro de ano: ignora 2023, 2024, 2025 se aparecerem soltos
          if (val >= 2023 && val <= 2026) return false;
