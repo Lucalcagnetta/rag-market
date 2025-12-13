@@ -41,15 +41,19 @@ app.get('/api/health', (req, res) => {
 
 app.get('/api/search', async (req, res) => {
   const { item } = req.query;
-  const userCookie = req.headers['x-ro-cookie'] || ''; 
+  let userCookie = req.headers['x-ro-cookie'] || ''; 
+
+  // --- CORREÇÃO CRÍTICA DO COOKIE ---
+  // Remove quebras de linha e espaços que vêm do copy-paste
+  if (userCookie) {
+    userCookie = userCookie.replace(/[\r\n]+/g, '').trim();
+  }
 
   if (!item) {
     return res.status(400).json({ success: false, error: 'Nome do item obrigatório' });
   }
 
-  // URL baseada na documentação do Ragnarok Latam
-  // NOTA: storeType=BUY procura lojas de COMPRA (pessoas querendo comprar).
-  // Se quiser ver lojas vendendo, seria storeType=SELL. Mantendo BUY conforme solicitado.
+  // URL exata solicitada
   const targetUrl = `https://ro.gnjoylatam.com/pt/intro/shop-search/trading?storeType=BUY&serverType=FREYA&searchWord=${encodeURIComponent(item)}`;
 
   console.log(`[SCRAPER] Buscando: ${item} -> ${targetUrl}`);
@@ -60,7 +64,6 @@ app.get('/api/search', async (req, res) => {
       'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
       'Cache-Control': 'no-cache',
-      'Pragma': 'no-cache',
       'Connection': 'keep-alive',
       'Referer': 'https://ro.gnjoylatam.com/pt/intro/shop-search',
       'Upgrade-Insecure-Requests': '1',
@@ -96,16 +99,12 @@ app.get('/api/search', async (req, res) => {
 
     const htmlText = await response.text();
     
-    // --- LÓGICA DE EXTRAÇÃO ---
+    // --- LÓGICA DE EXTRAÇÃO BLINDADA ---
     let candidates = [];
 
-    // 1. Tentar encontrar padrão visual exato "123.456 z" (pode ter tags no meio)
-    // Regex explicaçao: 
-    // (\d{1,3}(?:\.\d{3})+) -> Pega números formatados obrigatoriamente com pontos (ex: 1.000). Evita pegar "1" ou "20".
-    // \s* -> Espaços opcionais
-    // (?:<[^>]*>)* -> Ignora tags HTML que possam estar no meio (ex: <span>)
-    // \s*z -> Termina com z (case insensitive)
-    const strictRegex = /(\d{1,3}(?:\.\d{3})+)\s*(?:<[^>]*>)*\s*z/gi;
+    // ESTRATÉGIA 1: Busca exata "123.456 z" (mesmo com tags no meio)
+    // Regex: Números com ponto + tags opcionais + z
+    const strictRegex = /(\d{1,3}(?:\.\d{3})+)\s*(?:<[^>]+>)*\s*z/gi;
     const strictMatches = [...htmlText.matchAll(strictRegex)];
     
     for (const match of strictMatches) {
@@ -113,22 +112,25 @@ app.get('/api/search', async (req, res) => {
         if (!isNaN(val)) candidates.push(val);
     }
 
-    // 2. Fallback: Se não achou com 'z', procura qualquer número formatado com pontos
-    // Isso ajuda se o site mudou a posição do 'z'
+    // ESTRATÉGIA 2: Busca ampla por qualquer padrão numérico "123.456"
+    // Útil se o HTML mudou e o 'z' está em outra div longe
     if (candidates.length === 0) {
-        console.log(`[DEBUG] Modo estrito falhou para ${item}, tentando busca genérica de números...`);
-        // Procura strings numéricas isoladas que tenham separador de milhar (ponto)
-        const looseRegex = />\s*(\d{1,3}(?:\.\d{3})+)\s*</g;
+        console.log(`[DEBUG] Busca estrita falhou para ${item}, ativando busca ampla...`);
+        // Procura strings que pareçam preços (ex: 179.899.999)
+        // \b garante que não estamos pegando parte de um ID
+        const looseRegex = /\b\d{1,3}(?:\.\d{3})+\b/g;
         const looseMatches = [...htmlText.matchAll(looseRegex)];
         
         for (const match of looseMatches) {
-             const val = parsePriceString(match[1]);
-             // Filtros de segurança para não pegar IDs ou anos
+             const val = parsePriceString(match[0]);
+             
              if (!isNaN(val)) {
-                // Ragnarok tem preços altos. Ignorar números pequenos soltos se não tinham 'z'
-                // E ignorar anos (2020-2030)
-                if (val > 500 && (val < 2020 || val > 2030)) {
-                    candidates.push(val);
+                // Filtros de segurança para não pegar Lixo, Anos ou IDs
+                // Preço > 500z
+                // Ignorar anos comuns (2020-2030) se o valor for baixo
+                if (val > 500) {
+                   if (val >= 2020 && val <= 2030) continue; // Ignora possível data
+                   candidates.push(val);
                 }
              }
         }
@@ -137,31 +139,34 @@ app.get('/api/search', async (req, res) => {
     // --- ANÁLISE DE RESULTADOS ---
 
     if (candidates.length > 0) {
-        // Encontramos preços!
         const minPrice = Math.min(...candidates);
-        console.log(`[SUCESSO] ${item}: Preços encontrados [${candidates.length}] -> Menor: ${minPrice}`);
+        console.log(`[SUCESSO] ${item}: ${candidates.length} valores encontrados. Menor: ${minPrice}`);
         return res.json({
             success: true,
             price: minPrice
         });
     }
 
-    // --- TRATAMENTO DE ERROS DE CONTEÚDO ---
+    // --- DIAGNÓSTICO DE ERRO ---
     
-    // Verifica se caiu na tela de login
     if (htmlText.includes('name="password"') || htmlText.includes('name="account"')) {
         return res.json({ success: false, price: null, error: 'Login necessário (Cookie expirou).' });
     }
 
-    // Verifica se não achou nada
-    if (htmlText.includes('não foram encontrados') || htmlText.includes('No results') || htmlText.includes('list-none')) {
+    // Tenta detectar mensagem de "não encontrado" em PT, ES ou EN
+    if (
+      htmlText.includes('não foram encontrados') || 
+      htmlText.includes('No results') || 
+      htmlText.includes('list-none') ||
+      htmlText.includes('Resultado da pesquisa 0')
+    ) {
         return res.json({ success: true, price: 0, error: 'Sem vendedores no momento.' });
     }
 
-    // Debug final: Se chegou aqui, o HTML veio mas não conseguimos ler.
-    // console.log(`[DEBUG HTML] Inicio do HTML recebido:`, htmlText.substring(0, 500));
+    // Se chegou aqui, o HTML veio mas não conseguimos ler.
+    // console.log(`[DEBUG HTML] Dump parcial:`, htmlText.substring(0, 1000));
     
-    return res.json({ success: false, price: null, error: 'Preço não identificado no HTML.' });
+    return res.json({ success: false, price: null, error: 'Item não encontrado ou layout mudou.' });
 
   } catch (error) {
     console.error(`[ERRO CRÍTICO] ${item}:`, error.message);
