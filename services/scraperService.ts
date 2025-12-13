@@ -22,17 +22,10 @@ export const fetchPrice = async (
   }
 
   try {
-    // Adiciona Timeout de 28s no cliente (antes do Watchdog de 30s do App)
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 28000);
-
     const response = await fetch(apiUrl, {
       method: 'GET',
       headers: headers,
-      signal: controller.signal
     });
-
-    clearTimeout(timeoutId);
 
     if (!response.ok) {
       return { success: false, price: null, error: `Erro HTTP: ${response.status}` };
@@ -42,9 +35,6 @@ export const fetchPrice = async (
     return data;
 
   } catch (err: any) {
-    if (err.name === 'AbortError') {
-        return { success: false, price: null, error: 'Timeout: Servidor demorou muito' };
-    }
     return {
       success: false,
       price: null,

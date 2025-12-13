@@ -28,7 +28,6 @@ const UPDATE_INTERVAL_MS = 2 * 60 * 1000; // 2 Minutes
 const SAFETY_DELAY_MS = 2000; // 2s de delay entre lotes
 const BATCH_SIZE = 2; // Processa 2 por vez
 const WATCHDOG_TIMEOUT_MS = 30000; // 30s: Se travar, o watchdog reseta
-const SYNC_INTERVAL_MS = 5000; // 5s: Sincroniza com o servidor
 
 const App: React.FC = () => {
   // -- State --
@@ -56,6 +55,8 @@ const App: React.FC = () => {
   const [editingTargetInput, setEditingTargetInput] = useState<string>('');
 
   // -- AUDIO CONTEXT REF (Global para o componente) --
+  // Navegadores bloqueiam audioContext se não for iniciado por clique.
+  // Usamos um Ref para manter o contexto vivo e destravado.
   const audioCtxRef = useRef<AudioContext | null>(null);
 
   // -- Refs for loop control --
@@ -69,14 +70,15 @@ const App: React.FC = () => {
   const processingStartTimeRef = useRef<number>(0);
   const lastFetchTimeRef = useRef<number>(0);
   
-  // Controle de Sync
-  const isSavingRef = useRef(false);
+  const saveTimeoutRef = useRef<number | null>(null);
 
   // Sync refs with state
   useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
   useEffect(() => { overrideNightModeRef.current = overrideNightMode; }, [overrideNightMode]);
   
   // -- AUDIO HELPERS --
+
+  // Inicializa/Destrava o áudio (Deve ser chamado em cliques de botões)
   const initAudio = useCallback(() => {
     try {
       if (!audioCtxRef.current) {
@@ -92,79 +94,74 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Som 1: Preço caiu (Beep)
   const playPriceDropSound = useCallback(() => {
     try {
-      if (!audioCtxRef.current) initAudio();
+      if (!audioCtxRef.current) initAudio(); // Tenta iniciar se não existir
       const ctx = audioCtxRef.current;
       if (!ctx) return;
 
       const oscillator = ctx.createOscillator();
       const gainNode = ctx.createGain();
+      
       oscillator.connect(gainNode);
       gainNode.connect(ctx.destination);
+      
       oscillator.type = 'sine';
       oscillator.frequency.setValueAtTime(880, ctx.currentTime); 
       oscillator.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.3);
+      
       gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
       gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      
       oscillator.start();
       oscillator.stop(ctx.currentTime + 0.3);
-    } catch (e) { console.error("Audio play failed", e); }
+    } catch (e) {
+      console.error("Audio play failed", e);
+    }
   }, [initAudio]);
 
+  // Som 2: OFERTA! (Ding-Ding)
   const playDealSound = useCallback(() => {
     try {
       if (!audioCtxRef.current) initAudio();
       const ctx = audioCtxRef.current;
       if (!ctx) return;
+      
       const now = ctx.currentTime;
+
+      // Nota 1 (Aguda)
       const osc1 = ctx.createOscillator();
       const gain1 = ctx.createGain();
       osc1.connect(gain1);
       gain1.connect(ctx.destination);
+      
       osc1.type = 'square';
       osc1.frequency.setValueAtTime(523.25, now); // C5
       gain1.gain.setValueAtTime(0.05, now);
       gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
       osc1.start(now);
       osc1.stop(now + 0.1);
+
+      // Nota 2 (Mais aguda ainda)
       const osc2 = ctx.createOscillator();
       const gain2 = ctx.createGain();
       osc2.connect(gain2);
       gain2.connect(ctx.destination);
+      
       osc2.type = 'square';
       osc2.frequency.setValueAtTime(1046.50, now + 0.15); // C6
       gain2.gain.setValueAtTime(0.05, now + 0.15);
       gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
       osc2.start(now + 0.15);
       osc2.stop(now + 0.6);
-    } catch (e) { console.error("Audio play failed", e); }
+
+    } catch (e) {
+      console.error("Audio play failed", e);
+    }
   }, [initAudio]);
 
   // -- DATA PERSISTENCE --
-  
-  // Função de salvamento EXPLÍCITO (Substitui o useEffect de auto-save)
-  const saveData = useCallback(async (currentItems: Item[], currentSettings: Settings) => {
-    isSavingRef.current = true;
-    setSaveStatus('saving');
-    
-    try {
-      await fetch('/api/db', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: currentItems, settings: currentSettings })
-      });
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 2000);
-    } catch (err) {
-      console.error("Failed to save to server", err);
-      setSaveStatus('error');
-    } finally {
-      isSavingRef.current = false;
-    }
-  }, []);
-
-  // Carga Inicial
   useEffect(() => {
     const loadFromServer = async () => {
       try {
@@ -172,13 +169,15 @@ const App: React.FC = () => {
         if (res.ok) {
           const data = await res.json();
           if (data.items && Array.isArray(data.items)) {
-            // Migração de dados legado
+            // -- MIGRAÇÃO DE DADOS --
+            // Corrige itens antigos onde o usuário digitou "15" querendo dizer "15kk"
             const fixedItems = data.items.map((i: Item) => {
                if (i.targetPrice > 0 && i.targetPrice < 1000) {
                  return { ...i, targetPrice: i.targetPrice * 1000000 };
                }
                return i;
             });
+            
             setItems(fixedItems);
             itemsRef.current = fixedItems;
           }
@@ -197,65 +196,30 @@ const App: React.FC = () => {
     loadFromServer();
   }, []);
 
-  // Atualiza Refs
-  useEffect(() => {
-    itemsRef.current = items;
-    settingsRef.current = settings;
-  }, [items, settings]);
+  const saveDataToServer = useCallback((newItems: Item[], newSettings: Settings) => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    setSaveStatus('saving');
+    saveTimeoutRef.current = window.setTimeout(async () => {
+      try {
+        await fetch('/api/db', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: newItems, settings: newSettings })
+        });
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+      } catch (err) {
+        console.error("Failed to save to server", err);
+        setSaveStatus('error');
+      }
+    }, 1000);
+  }, []);
 
-
-  // -- POLLING (SYNC) --
-  // Sincroniza dados com o servidor periodicamente para pegar o "Visto" de outros dispositivos
   useEffect(() => {
     if (!dataLoaded) return;
-
-    const syncInterval = setInterval(async () => {
-      // Não sincroniza se estiver editando ou salvando (evita conflitos de UI)
-      if (editingItem || isSavingRef.current || processingRef.current) return;
-
-      try {
-        const res = await fetch('/api/db');
-        if (res.ok) {
-          const data = await res.json();
-          const serverItems: Item[] = data.items || [];
-          
-          setItems(currentLocalItems => {
-            // Lógica de Fusão (Merge): Servidor x Local
-            // Queremos os dados novos do servidor, MAS se o local estiver carregando (scraper rodando),
-            // preservamos o status LOADING para não quebrar a automação.
-            
-            // Se as listas forem idênticas em tamanho e conteúdo chave, não faz nada para evitar re-render
-            const hasChanges = JSON.stringify(serverItems) !== JSON.stringify(currentLocalItems);
-            // Simplificação: só atualiza se realmente necessário, mas o scraper muda coisas frequentemente
-            
-            return serverItems.map(sItem => {
-              const localItem = currentLocalItems.find(l => l.id === sItem.id);
-              
-              if (localItem && localItem.status === Status.LOADING) {
-                // Se localmente estamos buscando preço, ignoramos o status do servidor,
-                // mas aceitamos outras mudanças (como Visto/Target Price)
-                return {
-                  ...sItem,
-                  status: Status.LOADING 
-                };
-              }
-              // Caso contrário, o servidor é a fonte da verdade (incluindo Visto/Acks)
-              return sItem;
-            });
-          });
-          
-          // Atualiza Settings se mudou lá
-          if (data.settings && JSON.stringify(data.settings) !== JSON.stringify(settingsRef.current)) {
-              setSettings(data.settings);
-          }
-        }
-      } catch (e) {
-        console.error("Sync error", e);
-      }
-    }, SYNC_INTERVAL_MS);
-
-    return () => clearInterval(syncInterval);
-  }, [dataLoaded, editingItem]); // Removemos isSaving/processing das dependências para usar Refs
+    itemsRef.current = items;
+    saveDataToServer(items, settings);
+  }, [items, settings, dataLoaded, saveDataToServer]);
 
 
   // -- Sorting Logic --
@@ -267,16 +231,21 @@ const App: React.FC = () => {
       const aHasDrop = !!a.hasPriceDrop;
       const bHasDrop = !!b.hasPriceDrop;
 
+      // "Active" = Alerta não visto (Prioridade Absoluta)
       const aActive = (aIsDeal || aHasDrop) && !a.isAck;
       const bActive = (bIsDeal || bHasDrop) && !b.isAck;
 
+      // 1. Alertas Não Vistos - TOPO DA LISTA (Piscando)
       if (aActive && !bActive) return -1;
       if (!aActive && bActive) return 1;
 
+      // Se ambos são alertas não vistos, ordena por NOME para estabilidade (não ficar pulando)
       if (aActive && bActive) {
          return a.name.localeCompare(b.name);
       }
 
+      // 2. Itens Interessantes (Ofertas ou Quedas) JÁ VISTOS
+      // Estes ficam logo abaixo dos alertas ativos
       const aInteresting = aIsDeal || aHasDrop;
       const bInteresting = bIsDeal || bHasDrop;
 
@@ -284,10 +253,15 @@ const App: React.FC = () => {
       if (!aInteresting && bInteresting) return 1;
 
       if (aInteresting && bInteresting) {
+          // Entre dois interessantes, prioriza OFERTA (Verde)
           if (aIsDeal && !bIsDeal) return -1;
           if (!aIsDeal && bIsDeal) return 1;
+
+          // Se forem iguais, ordena por nome
           return a.name.localeCompare(b.name);
       }
+
+      // 3. Itens Normais (Ordena por Nome)
       return a.name.localeCompare(b.name);
     });
   }, []);
@@ -295,6 +269,7 @@ const App: React.FC = () => {
   // -- Automation Loop --
   useEffect(() => {
     const intervalId = setInterval(async () => {
+      // 1. Checa se o usuário pausou globalmente
       if (!isRunningRef.current) {
         setIsNightPause(false); 
         return;
@@ -303,21 +278,25 @@ const App: React.FC = () => {
       const currentHour = new Date().getHours();
       const isSleepTime = currentHour >= 1 && currentHour < 8;
 
+      // 2. Lógica de Override (Rearme Diurno)
+      // Se não for hora de dormir (ex: 9h da manhã) e o override estiver ativo,
+      // desativa o override para que, na próxima noite, ele pause automaticamente.
       if (!isSleepTime && overrideNightModeRef.current) {
         setOverrideNightMode(false);
       }
 
+      // 3. Decide se deve pausar
+      // Pausa SE for horário de dormir E o usuário NÃO tiver forçado a execução
       const effectivePause = isSleepTime && !overrideNightModeRef.current;
+      
       setIsNightPause(effectivePause);
       if (effectivePause) return;
 
-      // WATCHDOG MELHORADO: Reseta itens travados
+      // WATCHDOG
       if (processingRef.current) {
         if (Date.now() - processingStartTimeRef.current > WATCHDOG_TIMEOUT_MS) {
-           console.warn("⚠️ Watchdog: Processamento travado detectado. Reiniciando fila e resetando itens.");
+           console.warn("⚠️ Watchdog: Processamento travado detectado. Reiniciando fila.");
            processingRef.current = false;
-           // Força reset de itens que ficaram presos em LOADING
-           setItems(prev => prev.map(i => i.status === Status.LOADING ? { ...i, status: Status.IDLE } : i));
         }
         return;
       }
@@ -326,6 +305,7 @@ const App: React.FC = () => {
       if (now - lastFetchTimeRef.current < SAFETY_DELAY_MS) return; 
 
       const currentItems = itemsRef.current;
+      
       const candidates = currentItems
         .filter(i => i.nextUpdate <= now && i.status !== Status.LOADING)
         .slice(0, BATCH_SIZE);
@@ -349,8 +329,6 @@ const App: React.FC = () => {
 
           const results = await Promise.all(promises);
           lastFetchTimeRef.current = Date.now();
-          
-          let listToSave: Item[] = [];
 
           setItems(prev => {
             let foundDeal = false;
@@ -366,6 +344,7 @@ const App: React.FC = () => {
               const oldPrice = i.lastPrice;
               
               const isDeal = isSuccess && newPrice !== null && newPrice > 0 && newPrice <= i.targetPrice;
+              // Verifica se JÁ ERA um deal antes
               const wasDeal = oldPrice !== null && oldPrice > 0 && oldPrice <= i.targetPrice;
               
               const isPriceDrop = isSuccess && 
@@ -375,6 +354,12 @@ const App: React.FC = () => {
                                   oldPrice > 0 && 
                                   newPrice < oldPrice;
 
+              // Lógica de Notificação e Reset de Visto (Ack):
+              // Resetamos o "Visto" (isAck = false) APENAS SE:
+              // 1. O preço caiu (isPriceDrop) - Sempre avisa se ficar mais barato.
+              // 2. Virou um Deal e NÃO era antes (Novo Deal).
+              // OBS: Se já era Deal e o preço não mudou (ou subiu mas continua abaixo do alvo), 
+              // mantemos o isAck do usuário para não incomodar.
               const shouldResetAck = isPriceDrop || (isDeal && !wasDeal);
 
               if (shouldResetAck) {
@@ -394,20 +379,19 @@ const App: React.FC = () => {
                 message: result.error || undefined,
                 nextUpdate: nextTime,
                 isAck: shouldResetAck ? false : i.isAck, 
+                // Persiste o status de queda até ser visto
                 hasPriceDrop: isPriceDrop ? true : i.hasPriceDrop
               };
             });
 
-            if (foundDeal) playDealSound();
-            else if (foundDrop) playPriceDropSound();
+            if (foundDeal) {
+                playDealSound();
+            } else if (foundDrop) {
+                playPriceDropSound();
+            }
             
-            listToSave = updatedList;
             return updatedList; 
           });
-          
-          if (listToSave.length > 0) {
-              await saveData(listToSave, settingsRef.current);
-          }
 
         } catch (e) {
           console.error("Erro no lote:", e);
@@ -419,32 +403,40 @@ const App: React.FC = () => {
     }, 1000);
 
     return () => clearInterval(intervalId);
-  }, [playDealSound, playPriceDropSound, saveData]); // Adicionado saveData
+  }, [playDealSound, playPriceDropSound]);
 
   // -- Handlers --
   const toggleAutomation = () => {
-    initAudio(); 
+    initAudio(); // Destrava o áudio ao clicar
+    
+    // Se estivermos LIGANDO a automação
     if (!isRunning) {
         const h = new Date().getHours();
+        // Se for hora de dormir (01-08) e o usuário mandou ligar, ativamos o OVERRIDE
         if (h >= 1 && h < 8) {
             setOverrideNightMode(true);
         }
     } else {
+        // Se estivermos DESLIGANDO, resetamos o override para garantir 
+        // que na próxima vez respeite o horário (salvo se usuário forçar novamente)
         setOverrideNightMode(false);
     }
+
     setIsRunning(!isRunning);
   };
 
   const handleSaveSettings = () => {
-    initAudio();
+    initAudio(); // Destrava o áudio ao salvar
     setSettings(tempSettings);
-    saveData(items, tempSettings); // Save Explícito
   };
 
+  // Helper Inteligente: "30" -> 30kk
   const parseKkInput = (val: string): number => {
     if (!val) return 0;
     let numStr = val.toLowerCase().replace(/\s/g, '').replace(',', '.');
     let multiplier = 1;
+    
+    // Check suffixes
     if (numStr.includes('kk')) {
       multiplier = 1000000;
       numStr = numStr.replace('kk', '');
@@ -455,28 +447,35 @@ const App: React.FC = () => {
       multiplier = 1;
       numStr = numStr.replace('z', '');
     } else {
+      // SEM SUFIXO: Heurística Automática
       const tempNum = parseFloat(numStr);
       if (!isNaN(tempNum) && tempNum < 1000 && tempNum > 0) {
         multiplier = 1000000;
       }
     }
+    
     const num = parseFloat(numStr);
     return isNaN(num) ? 0 : Math.floor(num * multiplier);
   };
 
   const formatMoney = (val: number | null) => {
     if (val === null) return '--';
+
+    // Helper para truncar casas decimais sem arredondar para cima
     const floorValue = (value: number, decimals: number) => {
       const factor = Math.pow(10, decimals);
       return Math.floor(value * factor) / factor;
     };
+
     if (val >= 1000000) {
        const inMillions = val / 1000000;
+       // Ex: 24.999 -> 24.99
        const displayVal = floorValue(inMillions, 2); 
        return displayVal.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + 'kk';
     }
     if (val >= 1000) {
        const inThousands = val / 1000;
+       // Ex: 1.99 -> 1.9
        const displayVal = floorValue(inThousands, 1);
        return displayVal.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + 'k';
     }
@@ -484,7 +483,7 @@ const App: React.FC = () => {
   };
 
   const addNewItem = () => {
-    initAudio();
+    initAudio(); // Garante audio
     if (!newItemName.trim()) return;
     const target = parseKkInput(newItemTarget) || 1000000;
 
@@ -499,54 +498,37 @@ const App: React.FC = () => {
       isAck: false,
       hasPriceDrop: false
     };
-    
-    // Atualiza estado E salva
-    const newList = [...items, newItem];
-    setItems(newList);
-    saveData(newList, settings);
-    
+    setItems(prev => [...prev, newItem]);
     setNewItemName('');
     setNewItemTarget('');
   };
 
   const removeItem = (id: string) => {
     if (confirm("Tem certeza que deseja remover este item?")) {
-      const newList = items.filter(i => i.id !== id);
-      setItems(newList);
-      saveData(newList, settings); // Save Explícito
+      setItems(prev => prev.filter(i => i.id !== id));
     }
   };
 
   const handleEditClick = (item: Item) => {
     setEditingItem({ ...item });
+    // Carrega o input com o formato "30kk"
     setEditingTargetInput(formatMoney(item.targetPrice).replace('z', '').trim());
   };
 
   const saveEdit = () => {
-    initAudio();
+    initAudio(); // Garante audio
     if (!editingItem) return;
-    const newList = items.map(i => i.id === editingItem.id ? editingItem : i);
-    setItems(newList);
-    saveData(newList, settings); // Save Explícito
+    setItems(prev => prev.map(i => i.id === editingItem.id ? editingItem : i));
     setEditingItem(null);
   };
 
   const acknowledgeItem = (id: string) => {
-    setItems(prev => {
-        const newList = prev.map(i => i.id === id ? { ...i, isAck: true, hasPriceDrop: false } : i);
-        // Dispara o save usando a lista calculada, para garantir consistência
-        saveData(newList, settingsRef.current);
-        return newList;
-    });
+    setItems(prev => prev.map(i => i.id === id ? { ...i, isAck: true, hasPriceDrop: false } : i));
   };
 
   const acknowledgeAll = () => {
     if (confirm("Marcar todos os alertas como vistos?")) {
-      setItems(prev => {
-          const newList = prev.map(i => ({ ...i, isAck: true, hasPriceDrop: false }));
-          saveData(newList, settingsRef.current);
-          return newList;
-      });
+      setItems(prev => prev.map(i => ({ ...i, isAck: true, hasPriceDrop: false })));
     }
   };
 
