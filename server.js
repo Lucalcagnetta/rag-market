@@ -122,7 +122,7 @@ app.get('/api/search', async (req, res) => {
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s timeout
 
     const response = await fetch(targetUrl, { 
       method: 'GET', 
@@ -167,7 +167,11 @@ app.get('/api/search', async (req, res) => {
 
     if (match1) {
         const val = parsePriceString(match1[1]);
-        if (val > 100 && val < 1000000000) {
+        
+        // FILTROS CRÍTICOS
+        if (val === 20000000) { /* Ignora saldo de 20kk */ }
+        else if (val >= 2023 && val <= 2026) { /* Ignora anos */ }
+        else if (val > 100 && val < 1000000000) {
              console.log(`[SUCESSO M1] ${item}: ${val}`);
              return res.json({ success: true, price: val });
         }
@@ -187,8 +191,11 @@ app.get('/api/search', async (req, res) => {
         
         // Filtros válidos
         if (!isNaN(val) && val > 100 && val < 1000000000) {
+            // Ignora o saldo de 20kk (Valor fixo no header do site)
+            if (val === 20000000) continue;
+
             // Ignora anos (regras do GAS)
-            if (val !== 2024 && val !== 2025) {
+            if (val !== 2023 && val !== 2024 && val !== 2025 && val !== 2026) {
                 if (val < minPrice) {
                     minPrice = val;
                     found = true;
