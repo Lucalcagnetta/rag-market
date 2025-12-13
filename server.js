@@ -144,9 +144,12 @@ app.get('/api/search', async (req, res) => {
         return res.json({ success: false, price: null, error: `Erro HTTP: ${status}` });
     }
 
-    const htmlText = await response.text();
-    console.log(`📡 HTTP ${status} - ${htmlText.length} chars`);
+    const htmlTextRaw = await response.text();
+    console.log(`📡 HTTP ${status} - ${htmlTextRaw.length} chars`);
     
+    // LIMPEZA: Remove quebras de linha e espaços extras para facilitar o Regex
+    const htmlText = htmlTextRaw.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ');
+
     // 2. Verificações de Conteúdo (Login/Bloqueio)
     if (htmlText.includes('member/login') || htmlText.includes('signin-form') || htmlText.includes('name="password"')) {
         return res.json({ success: false, price: null, error: 'Precisa fazer login' });
@@ -157,52 +160,49 @@ app.get('/api/search', async (req, res) => {
     }
 
     // =======================================================
-    // BUSCA DE PREÇO (LÓGICA EXATA DO GAS)
+    // BUSCA DE PREÇO (Melhorada)
     // =======================================================
-
-    // MÉTODO 1: Regex específico para formato "100.000 z" entre tags
-    // Regex: />\s*([0-9]{1,3}(?:[.,\s]?[0-9]{3})*)\s*z\s*</i
-    const method1Regex = />\s*([0-9]{1,3}(?:[.,\s]?[0-9]{3})*)\s*z\s*</i;
-    const match1 = htmlText.match(method1Regex);
-
-    if (match1) {
-        const val = parsePriceString(match1[1]);
-        if (val > 100 && val < 1000000000) {
-             console.log(`[SUCESSO M1] ${item}: ${val}`);
-             return res.json({ success: true, price: val });
-        }
-    }
-
-    // MÉTODO 2: Procura em toda a página (Fallback)
-    // Regex: />\s*([0-9,\.\s]+)\s*(?:z|Zeny)?\s*</gi
-    const method2Regex = />\s*([0-9,\.\s]+)\s*(?:z|Zeny)?\s*</gi;
-    const matches2 = [...htmlText.matchAll(method2Regex)];
     
-    let minPrice = Infinity;
-    let found = false;
+    let pricesFound = [];
 
+    // MÉTODO 1: Regex específico para formato "100.000 z" entre tags (Maior certeza)
+    const method1Regex = />\s*([0-9]{1,3}(?:[.,][0-9]{3})*)\s*z\s*</gi;
+    const matches1 = [...htmlText.matchAll(method1Regex)];
+    for (const m of matches1) {
+       pricesFound.push(parsePriceString(m[1]));
+    }
+
+    // MÉTODO 2: Busca números soltos formatados com pontos (Ex: 150.000 ou 1.000.000)
+    // Isso pega itens onde o 'z' está longe ou formatado diferente.
+    // O padrão exige pelo menos um ponto separando milhares para evitar pegar IDs ou quantidades pequenas (1, 10).
+    const method2Regex = /([1-9][0-9]{0,2}(?:\.[0-9]{3})+)/g;
+    const matches2 = [...htmlText.matchAll(method2Regex)];
     for (const m of matches2) {
-        // m[1] contém o grupo de captura com o número
-        const val = parsePriceString(m[1]);
-        
-        // Filtros válidos
-        if (!isNaN(val) && val > 100 && val < 1000000000) {
-            // Ignora anos (regras do GAS)
-            if (val !== 2024 && val !== 2025) {
-                if (val < minPrice) {
-                    minPrice = val;
-                    found = true;
-                }
-            }
-        }
+       pricesFound.push(parsePriceString(m[1]));
     }
 
-    if (found && minPrice !== Infinity) {
-        console.log(`[SUCESSO M2] ${item}: ${minPrice}`);
-        return res.json({ success: true, price: minPrice });
+    // FILTRAGEM DE PREÇOS
+    // Remove duplicatas, ordena e filtra valores inválidos
+    const validPrices = pricesFound
+      .filter(val => {
+         if (isNaN(val)) return false;
+         // Filtro de segurança: menor que 100z é provavelmente erro/quantidade
+         if (val < 100) return false;
+         // Filtro de segurança: maior que 2bi é provavelmente erro
+         if (val > 2000000000) return false;
+         // Filtro de ano: ignora 2023, 2024, 2025 se aparecerem soltos (muito comum em footers)
+         if (val >= 2023 && val <= 2026) return false;
+         return true;
+      })
+      .sort((a, b) => a - b); // Ordena do menor para o maior
+
+    if (validPrices.length > 0) {
+        const bestPrice = validPrices[0];
+        console.log(`[SUCESSO] ${item}: ${bestPrice} (Encontrados: ${validPrices.length})`);
+        return res.json({ success: true, price: bestPrice });
     }
 
-    // 3. Verifica se não há resultados
+    // 3. Verifica se realmente não há resultados (mensagem do site)
     if (
       htmlText.includes('não foram encontrados') || 
       htmlText.includes('No results') || 
@@ -214,6 +214,7 @@ app.get('/api/search', async (req, res) => {
         return res.json({ success: true, price: 0, error: 'Sem ofertas' });
     }
     
+    console.log(`[FALHA] Preço não encontrado no HTML para: ${item}`);
     return res.json({ success: false, price: null, error: 'Preço não encontrado' });
 
   } catch (error) {

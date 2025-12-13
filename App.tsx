@@ -17,7 +17,8 @@ import {
   Eye,
   Database,
   Moon,
-  Sun
+  Sun,
+  TrendingDown
 } from 'lucide-react';
 
 // Simple notification sound (beep)
@@ -147,27 +148,32 @@ const App: React.FC = () => {
 
   // -- Sorting Logic --
   // Priority: 
-  // 1. Deal & NOT Seen (Blinking)
-  // 2. Deal & Seen (Static Green)
+  // 1. Unseen Events (Deal OR Price Drop)
+  // 2. Active Deal (Seen)
   // 3. Others
   const getSortedItems = useCallback((currentItems: Item[]) => {
     return [...currentItems].sort((a, b) => {
       const aIsDeal = a.lastPrice !== null && a.lastPrice > 0 && a.lastPrice <= a.targetPrice;
       const bIsDeal = b.lastPrice !== null && b.lastPrice > 0 && b.lastPrice <= b.targetPrice;
+      
+      const aIsEvent = aIsDeal || a.hasPriceDrop;
+      const bIsEvent = bIsDeal || b.hasPriceDrop;
 
-      // Se ambos são Deal
-      if (aIsDeal && bIsDeal) {
-        // Se A não foi visto e B foi visto -> A vem primeiro
-        if (!a.isAck && b.isAck) return -1;
-        if (a.isAck && !b.isAck) return 1;
-        return 0;
-      }
+      const aUnseen = aIsEvent && !a.isAck;
+      const bUnseen = bIsEvent && !b.isAck;
 
-      // Se A é Deal e B não é
+      // 1. Unseen Events (Piscando) - Topo Absoluto
+      if (aUnseen && !bUnseen) return -1;
+      if (!aUnseen && bUnseen) return 1;
+
+      // 2. Active Deals (Vistos)
       if (aIsDeal && !bIsDeal) return -1;
-      // Se B é Deal e A não é
       if (!aIsDeal && bIsDeal) return 1;
       
+      // 3. Price Drop (Vistos mas não são deals)
+      if (a.hasPriceDrop && !b.hasPriceDrop) return -1;
+      if (!a.hasPriceDrop && b.hasPriceDrop) return 1;
+
       return 0; 
     });
   }, []);
@@ -175,7 +181,7 @@ const App: React.FC = () => {
   // -- Automation Loop --
   useEffect(() => {
     const intervalId = setInterval(async () => {
-      // 1. Checagem de Pausa Manual (Botão do Usuário)
+      // 1. Checagem de Pausa Manual
       if (!isRunningRef.current) {
         setIsNightPause(false); 
         return;
@@ -183,14 +189,11 @@ const App: React.FC = () => {
 
       // 2. Checagem de Horário (01:00 as 08:00)
       const currentHour = new Date().getHours();
-      // Pausa se for maior ou igual a 1 AM E menor que 8 AM
       const isSleepTime = currentHour >= 1 && currentHour < 8;
 
-      // Atualiza estado visual
       setIsNightPause(isSleepTime);
 
       if (isSleepTime) {
-        // Se estiver no horário de dormir, não faz nada, apenas retorna
         return;
       }
 
@@ -203,13 +206,11 @@ const App: React.FC = () => {
 
       const currentItems = itemsRef.current;
       
-      // Find one item that needs update
       const candidate = currentItems.find(i => i.nextUpdate <= now && i.status !== Status.LOADING);
 
       if (candidate) {
         processingRef.current = true;
         
-        // Mark as loading
         setItems(prev => prev.map(i => i.id === candidate.id ? { ...i, status: Status.LOADING } : i));
 
         try {
@@ -228,14 +229,26 @@ const App: React.FC = () => {
 
               const isSuccess = result.success;
               const newPrice = result.price;
+              const oldPrice = i.lastPrice;
               
+              // 1. Detecta Deal (Abaixo do alvo)
               const isDeal = isSuccess && newPrice !== null && newPrice > 0 && newPrice <= i.targetPrice;
               
-              if (isDeal) {
+              // 2. Detecta Queda de Preço (Independente do alvo)
+              // Deve ser válida (maior que 0) e menor que o preço anterior conhecido
+              const isPriceDrop = isSuccess && 
+                                  newPrice !== null && 
+                                  oldPrice !== null && 
+                                  newPrice > 0 && 
+                                  oldPrice > 0 && 
+                                  newPrice < oldPrice;
+
+              // Aciona alerta se for Deal OU Queda de Preço
+              if (isDeal || isPriceDrop) {
                 playAlertSound();
               }
 
-              const shouldAlert = isDeal; 
+              const shouldAlert = isDeal || isPriceDrop;
 
               return {
                 ...i,
@@ -244,7 +257,8 @@ const App: React.FC = () => {
                 status: isSuccess ? (newPrice === 0 ? Status.ALERTA : Status.OK) : Status.ERRO,
                 message: result.error || undefined,
                 nextUpdate: Date.now() + UPDATE_INTERVAL_MS,
-                isAck: shouldAlert ? false : i.isAck // Reseta o visto se for deal
+                isAck: shouldAlert ? false : i.isAck, // Reseta o visto se houver novidade
+                hasPriceDrop: isPriceDrop ? true : (isSuccess ? false : i.hasPriceDrop) // Reseta flag se atualizou com sucesso e preço subiu/igual, mantem se erro
               };
             });
             
@@ -270,7 +284,6 @@ const App: React.FC = () => {
 
   const handleSaveSettings = () => {
     setSettings(tempSettings);
-    // Visual feedback is handled by the saveDataToServer effect
   };
 
   const addNewItem = () => {
@@ -285,7 +298,8 @@ const App: React.FC = () => {
       lastUpdated: null,
       status: Status.IDLE,
       nextUpdate: 0,
-      isAck: false
+      isAck: false,
+      hasPriceDrop: false
     };
     setItems(prev => [...prev, newItem]);
     setNewItemName('');
@@ -298,27 +312,25 @@ const App: React.FC = () => {
     }
   };
 
-  // Start Editing
   const handleEditClick = (item: Item) => {
     setEditingItem({ ...item });
   };
 
-  // Save Edit
   const saveEdit = () => {
     if (!editingItem) return;
     setItems(prev => prev.map(i => i.id === editingItem.id ? editingItem : i));
     setEditingItem(null);
   };
 
-  // Acknowledge Deal (Mark as Seen)
   const acknowledgeItem = (id: string) => {
-    setItems(prev => prev.map(i => i.id === id ? { ...i, isAck: true } : i));
+    // Ao clicar no olho, marcamos como visto e removemos a flag de queda de preço visual
+    setItems(prev => prev.map(i => i.id === id ? { ...i, isAck: true, hasPriceDrop: false } : i));
   };
 
   // -- Helpers --
   const formatMoney = (val: number | null) => {
     if (val === null) return '--';
-    return val.toLocaleString('pt-BR', { minimumFractionDigits: 0 }); // Sem decimais para Zeny geralmente
+    return val.toLocaleString('pt-BR', { minimumFractionDigits: 0 }); 
   };
 
   const sortedItems = getSortedItems(items);
@@ -337,7 +349,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#0d1117] text-slate-200 p-4 md:p-8 font-sans relative">
       
-      {/* CSS for Pulse Animation */}
+      {/* CSS for Pulse Animations */}
       <style>{`
         @keyframes pulse-green {
           0% { background-color: rgba(16, 185, 129, 0.05); border-color: rgba(16, 185, 129, 0.4); box-shadow: 0 0 0 rgba(16, 185, 129, 0); }
@@ -346,6 +358,15 @@ const App: React.FC = () => {
         }
         .animate-pulse-green {
           animation: pulse-green 1.5s infinite;
+        }
+        
+        @keyframes pulse-blue {
+          0% { background-color: rgba(59, 130, 246, 0.05); border-color: rgba(59, 130, 246, 0.4); }
+          50% { background-color: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 1); box-shadow: 0 0 20px rgba(59, 130, 246, 0.3); }
+          100% { background-color: rgba(59, 130, 246, 0.05); border-color: rgba(59, 130, 246, 0.4); }
+        }
+        .animate-pulse-blue {
+          animation: pulse-blue 1.5s infinite;
         }
       `}</style>
 
@@ -407,14 +428,12 @@ const App: React.FC = () => {
           <div className="flex flex-wrap items-center gap-3 mt-1">
              <p className="text-xs text-slate-500">Atualização a cada 2 minutos</p>
              
-             {/* Indicador de Pausa Noturna */}
              {isRunning && isNightPause && (
                <span className="flex items-center gap-1 text-[10px] bg-yellow-500/10 text-yellow-500 border border-yellow-500/30 px-2 py-0.5 rounded font-medium">
                  <Moon size={10} /> Pausa Agendada (01h-08h)
                </span>
              )}
              
-             {/* Indicador de Operação Normal */}
              {isRunning && !isNightPause && (
                 <span className="flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-500 border border-emerald-500/30 px-2 py-0.5 rounded font-medium">
                   <Sun size={10} /> Monitorando
@@ -543,25 +562,32 @@ const App: React.FC = () => {
               const hasError = item.status === Status.ERRO;
               const isLoading = item.status === Status.LOADING;
               
-              // Deal Ativo (Piscando) = Preço bom E ainda não "visto"
-              const isActiveAlert = isDeal && !item.isAck;
+              // Evento Ativo = (Deal OU Price Drop) E ainda não "visto"
+              const isActiveEvent = (isDeal || item.hasPriceDrop) && !item.isAck;
+
+              // Determina a classe de animação baseada no tipo de evento
+              let rowClass = "hover:bg-[#1c2128] border-l-transparent bg-[#161b22]";
+              
+              if (isActiveEvent) {
+                 if (isDeal) {
+                    rowClass = "animate-pulse-green border-l-emerald-500 bg-emerald-900/10";
+                 } else if (item.hasPriceDrop) {
+                    rowClass = "animate-pulse-blue border-l-blue-500 bg-blue-900/10";
+                 }
+              } else if (isDeal) {
+                  // Deal já visto
+                  rowClass = "border-l-emerald-700 bg-[#161b22]"; 
+              }
 
               return (
                 <div 
                   key={item.id} 
-                  className={`grid grid-cols-12 gap-4 px-6 py-4 items-center transition-all duration-500 border-l-4
-                    ${isActiveAlert 
-                      ? 'animate-pulse-green border-l-emerald-500 bg-emerald-900/10' 
-                      : isDeal 
-                        ? 'border-l-emerald-700 bg-[#161b22]' // Visto, mas ainda deal
-                        : 'hover:bg-[#1c2128] border-l-transparent bg-[#161b22]'
-                    }
-                  `}
+                  className={`grid grid-cols-12 gap-4 px-6 py-4 items-center transition-all duration-500 border-l-4 ${rowClass}`}
                 >
                   {/* Item Column */}
                   <div className="col-span-4 flex flex-col justify-center">
                     <div className="flex items-center gap-2">
-                      <span className={`font-semibold text-sm ${isDeal ? 'text-emerald-400' : 'text-white'}`}>
+                      <span className={`font-semibold text-sm ${isDeal ? 'text-emerald-400' : (item.hasPriceDrop ? 'text-blue-400' : 'text-white')}`}>
                         {item.name}
                       </span>
                     </div>
@@ -578,9 +604,12 @@ const App: React.FC = () => {
                   <div className="col-span-2 text-right pr-4">
                      {item.lastPrice !== null ? (
                        <div className="flex flex-col items-end">
-                         <span className={`font-mono font-bold text-lg ${isDeal ? 'text-emerald-400' : 'text-slate-200'}`}>
-                           {formatMoney(item.lastPrice)} z
-                         </span>
+                         <div className="flex items-center gap-1">
+                           {item.hasPriceDrop && <TrendingDown size={14} className="text-blue-500 animate-bounce" />}
+                           <span className={`font-mono font-bold text-lg ${isDeal ? 'text-emerald-400' : (item.hasPriceDrop ? 'text-blue-400' : 'text-slate-200')}`}>
+                             {formatMoney(item.lastPrice)} z
+                           </span>
+                         </div>
                        </div>
                      ) : (
                        <span className="text-slate-600 font-mono">--</span>
@@ -590,24 +619,27 @@ const App: React.FC = () => {
                   {/* Status / Updated */}
                   <div className="col-span-2 text-xs text-slate-500 flex flex-col justify-center">
                     <span>{item.lastUpdated ? new Date(item.lastUpdated).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '--:--'}</span>
-                    {isActiveAlert && <span className="text-emerald-500 font-bold uppercase tracking-wider text-[10px]">PREÇO BAIXO!</span>}
+                    
+                    {/* Labels de Status */}
+                    {isActiveEvent && isDeal && <span className="text-emerald-500 font-bold uppercase tracking-wider text-[10px]">PREÇO BAIXO!</span>}
+                    {isActiveEvent && !isDeal && item.hasPriceDrop && <span className="text-blue-500 font-bold uppercase tracking-wider text-[10px]">CAIU O PREÇO</span>}
                   </div>
 
                   {/* Actions */}
                   <div className="col-span-2 flex justify-end gap-2 items-center">
                     
-                    {/* Check Button for Deals */}
-                    {isActiveAlert && (
+                    {/* Check Button for Active Events (Deals or Drops) */}
+                    {isActiveEvent && (
                       <button 
                         onClick={() => acknowledgeItem(item.id)}
-                        className="bg-emerald-600 hover:bg-emerald-500 text-white p-2 rounded-full shadow-lg transition-transform hover:scale-110 mr-2"
-                        title="Marcar como visto (Parar alerta)"
+                        className={`text-white p-2 rounded-full shadow-lg transition-transform hover:scale-110 mr-2 ${isDeal ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-blue-600 hover:bg-blue-500'}`}
+                        title="Marcar como visto (Parar notificação)"
                       >
                         <Eye size={16} />
                       </button>
                     )}
 
-                    {/* Deal Seen Indicator */}
+                    {/* Seen Indicator (Only for Deals) */}
                     {isDeal && item.isAck && (
                       <div className="mr-2 text-emerald-700" title="Oferta já vista">
                         <CheckCircle2 size={18} />

@@ -16,7 +16,8 @@ export interface Item {
   status: Status;
   message?: string;
   nextUpdate: number; // Timestamp for next scheduled check
-  isAck?: boolean; // Se o usuário já "viu" a oferta atual
+  isAck?: boolean; // Se o usuário já "viu" a oferta/evento atual
+  hasPriceDrop?: boolean; // Se o preço caiu na última atualização
 }
 
 export interface Settings {
