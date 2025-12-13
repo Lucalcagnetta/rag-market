@@ -9,7 +9,9 @@ import {
   Trash2, 
   Settings as SettingsIcon, 
   Activity, 
-  Edit2
+  Edit2,
+  Save,
+  CheckCircle2
 } from 'lucide-react';
 
 // Simple notification sound (beep)
@@ -50,6 +52,10 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : INITIAL_SETTINGS;
   });
 
+  // Local state for settings form (to allow "Save" action)
+  const [tempSettings, setTempSettings] = useState<Settings>(settings);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
+
   const [isRunning, setIsRunning] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   
@@ -66,7 +72,14 @@ const App: React.FC = () => {
   // Sync refs with state
   useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
   useEffect(() => { itemsRef.current = items; localStorage.setItem('ro_items', JSON.stringify(items)); }, [items]);
-  useEffect(() => { settingsRef.current = settings; localStorage.setItem('ro_settings', JSON.stringify(settings)); }, [settings]);
+  
+  // Sync settings ref only when actually saved
+  useEffect(() => { 
+    settingsRef.current = settings; 
+    localStorage.setItem('ro_settings', JSON.stringify(settings)); 
+    // Also sync temp settings if settings change externally
+    setTempSettings(settings);
+  }, [settings]);
 
   // -- Sorting Logic --
   // Items that are "Good Deals" (Price <= Target) go to top.
@@ -134,7 +147,7 @@ const App: React.FC = () => {
               };
             });
             
-            return updatedList; // We rely on rendering sort, or we can sort here if we want strict order in state
+            return updatedList; 
           });
 
         } catch (e) {
@@ -152,6 +165,12 @@ const App: React.FC = () => {
   // -- Handlers --
   const toggleAutomation = () => {
     setIsRunning(!isRunning);
+  };
+
+  const handleSaveSettings = () => {
+    setSettings(tempSettings);
+    setSaveStatus('saved');
+    setTimeout(() => setSaveStatus('idle'), 3000);
   };
 
   const addNewItem = () => {
@@ -221,7 +240,7 @@ const App: React.FC = () => {
         <div className="flex gap-3">
           <button 
             onClick={() => setShowSettings(!showSettings)}
-            className="px-4 py-2 bg-[#161b22] hover:bg-[#21262d] rounded text-slate-400 border border-[#30363d] transition flex items-center gap-2 text-sm"
+            className={`px-4 py-2 rounded text-slate-200 border transition flex items-center gap-2 text-sm ${showSettings ? 'bg-[#1e293b] border-blue-500' : 'bg-[#161b22] border-[#30363d] hover:bg-[#21262d]'}`}
           >
             <SettingsIcon size={16} /> Configurações
           </button>
@@ -239,30 +258,44 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {/* Settings */}
+      {/* Settings Panel */}
       {showSettings && (
-        <div className="max-w-6xl mx-auto mb-6 bg-[#161b22] border border-[#30363d] rounded-lg p-6">
-          <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-wider">Configurações de Acesso</h3>
+        <div className="max-w-6xl mx-auto mb-6 bg-[#161b22] border border-[#30363d] rounded-lg p-6 animate-in fade-in slide-in-from-top-4 duration-300">
+          <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-wider flex items-center gap-2">
+            Configurações de Acesso
+            {saveStatus === 'saved' && <span className="text-emerald-500 text-xs flex items-center gap-1 normal-case font-normal"><CheckCircle2 size={12} /> Salvo com sucesso!</span>}
+          </h3>
           <div className="grid gap-4">
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">Cookie de Sessão</label>
-              <input 
-                type="password"
-                value={settings.cookie}
-                onChange={(e) => setSettings({...settings, cookie: e.target.value})}
-                placeholder="JSESSIONID=..."
-                className="w-full bg-[#0d1117] border border-[#30363d] rounded p-2 text-sm focus:border-blue-500 outline-none font-mono"
+              <textarea 
+                value={tempSettings.cookie}
+                onChange={(e) => setTempSettings({...tempSettings, cookie: e.target.value})}
+                placeholder="Cole aqui todo o conteúdo do Cookie..."
+                className="w-full bg-[#0d1117] border border-[#30363d] rounded p-2 text-sm focus:border-blue-500 outline-none font-mono text-slate-300 min-h-[80px]"
               />
+              <p className="text-[10px] text-slate-500 mt-1">
+                Acesse ro.gnjoylatam.com, faça login, abra o Console (F12) -> Network. Copie o valor de "Cookie" de qualquer requisição.
+              </p>
             </div>
-            <div className="flex items-center gap-4">
-               <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer">
+            
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer select-none">
                  <input 
                     type="checkbox"
-                    checked={settings.useProxy}
-                    onChange={(e) => setSettings({...settings, useProxy: e.target.checked})}
+                    checked={tempSettings.useProxy}
+                    onChange={(e) => setTempSettings({...tempSettings, useProxy: e.target.checked})}
+                    className="rounded border-slate-700 bg-slate-900"
                  />
                  Usar Proxy (Necessário para Web/Browser)
-               </label>
+              </label>
+
+              <button 
+                onClick={handleSaveSettings}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded text-sm font-medium transition flex items-center gap-2 shadow-lg shadow-emerald-900/20"
+              >
+                <Save size={16} /> SALVAR CONFIGURAÇÕES
+              </button>
             </div>
           </div>
         </div>

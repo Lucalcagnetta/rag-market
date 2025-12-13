@@ -35,6 +35,14 @@ const parsePriceString = (str) => {
   return parseInt(numericStr, 10);
 };
 
+// Função para remover scripts e styles que podem confundir o scraper
+const sanitizeHtml = (html) => {
+  return html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
+};
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'online', time: new Date().toISOString() });
 });
@@ -43,17 +51,19 @@ app.get('/api/search', async (req, res) => {
   const { item } = req.query;
   let userCookie = req.headers['x-ro-cookie'] || ''; 
 
-  // --- CORREÇÃO CRÍTICA DO COOKIE ---
-  // Remove quebras de linha e espaços que vêm do copy-paste
+  // --- CORREÇÃO DO COOKIE ---
   if (userCookie) {
     userCookie = userCookie.replace(/[\r\n]+/g, '').trim();
+    // Debug curto para saber se o cookie chegou
+    console.log(`[DEBUG] Cookie recebido (inicio): ${userCookie.substring(0, 20)}...`);
+  } else {
+    console.log(`[DEBUG] Nenhum cookie recebido no header.`);
   }
 
   if (!item) {
     return res.status(400).json({ success: false, error: 'Nome do item obrigatório' });
   }
 
-  // URL exata solicitada
   const targetUrl = `https://ro.gnjoylatam.com/pt/intro/shop-search/trading?storeType=BUY&serverType=FREYA&searchWord=${encodeURIComponent(item)}`;
 
   console.log(`[SCRAPER] Buscando: ${item} -> ${targetUrl}`);
@@ -66,11 +76,7 @@ app.get('/api/search', async (req, res) => {
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
       'Referer': 'https://ro.gnjoylatam.com/pt/intro/shop-search',
-      'Upgrade-Insecure-Requests': '1',
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'same-origin',
-      'Sec-Fetch-User': '?1'
+      'Upgrade-Insecure-Requests': '1'
     };
 
     if (userCookie) {
@@ -90,49 +96,44 @@ app.get('/api/search', async (req, res) => {
 
     if (response.status === 403 || response.status === 401) {
         console.error(`[ERRO] Acesso negado: ${response.status}`);
-        return res.json({ success: false, price: null, error: `Acesso Negado (${response.status}). Renove o Cookie.` });
+        return res.json({ success: false, price: null, error: `Acesso Negado (${response.status}). Cookie inválido.` });
     }
 
     if (!response.ok) {
         return res.json({ success: false, price: null, error: `Erro no site do Ragnarok: ${response.status}` });
     }
 
-    const htmlText = await response.text();
+    let htmlText = await response.text();
     
-    // --- LÓGICA DE EXTRAÇÃO BLINDADA ---
+    // --- VERIFICAÇÃO DE LOGIN ---
+    if (htmlText.includes('name="password"') || htmlText.includes('name="account"')) {
+        return res.json({ success: false, price: null, error: 'Login necessário (Cookie expirou).' });
+    }
+
+    // --- LIMPEZA ---
+    // Remove scripts e styles para evitar casar "width: 800px" como preço
+    htmlText = sanitizeHtml(htmlText);
+    
+    // --- LÓGICA DE EXTRAÇÃO ESTRITA ---
     let candidates = [];
 
-    // ESTRATÉGIA 1: Busca exata "123.456 z" (mesmo com tags no meio)
-    // Regex: Números com ponto + tags opcionais + z
-    const strictRegex = /(\d{1,3}(?:\.\d{3})+)\s*(?:<[^>]+>)*\s*z/gi;
+    // Regex Estrito: Procura números (com ou sem ponto) seguidos obrigatoriamente de 'z'
+    // Ex: "100.000 z", "50 z", "<span>179.899.999</span> z"
+    // (?:<[^>]+>)* permite tags HTML no meio
+    const strictRegex = /([\d\.]{1,15})\s*(?:<[^>]+>)*\s*z/gi;
     const strictMatches = [...htmlText.matchAll(strictRegex)];
     
     for (const match of strictMatches) {
-        const val = parsePriceString(match[1]);
-        if (!isNaN(val)) candidates.push(val);
-    }
-
-    // ESTRATÉGIA 2: Busca ampla por qualquer padrão numérico "123.456"
-    // Útil se o HTML mudou e o 'z' está em outra div longe
-    if (candidates.length === 0) {
-        console.log(`[DEBUG] Busca estrita falhou para ${item}, ativando busca ampla...`);
-        // Procura strings que pareçam preços (ex: 179.899.999)
-        // \b garante que não estamos pegando parte de um ID
-        const looseRegex = /\b\d{1,3}(?:\.\d{3})+\b/g;
-        const looseMatches = [...htmlText.matchAll(looseRegex)];
+        const rawValue = match[1];
+        const val = parsePriceString(rawValue);
         
-        for (const match of looseMatches) {
-             const val = parsePriceString(match[0]);
-             
-             if (!isNaN(val)) {
-                // Filtros de segurança para não pegar Lixo, Anos ou IDs
-                // Preço > 500z
-                // Ignorar anos comuns (2020-2030) se o valor for baixo
-                if (val > 500) {
-                   if (val >= 2020 && val <= 2030) continue; // Ignora possível data
-                   candidates.push(val);
-                }
-             }
+        if (!isNaN(val)) {
+            // Filtro de Segurança:
+            // 1. Ignora valores menores que 100z (Evita pegar paginação "1 z" se houver bug, ou lixo)
+            // 2. Ignora valores gigantes irreais se houver erro de parse
+            if (val > 100) {
+                 candidates.push(val);
+            }
         }
     }
 
@@ -147,13 +148,7 @@ app.get('/api/search', async (req, res) => {
         });
     }
 
-    // --- DIAGNÓSTICO DE ERRO ---
-    
-    if (htmlText.includes('name="password"') || htmlText.includes('name="account"')) {
-        return res.json({ success: false, price: null, error: 'Login necessário (Cookie expirou).' });
-    }
-
-    // Tenta detectar mensagem de "não encontrado" em PT, ES ou EN
+    // --- DIAGNÓSTICO DE ERRO (SEM PREÇOS) ---
     if (
       htmlText.includes('não foram encontrados') || 
       htmlText.includes('No results') || 
@@ -162,11 +157,8 @@ app.get('/api/search', async (req, res) => {
     ) {
         return res.json({ success: true, price: 0, error: 'Sem vendedores no momento.' });
     }
-
-    // Se chegou aqui, o HTML veio mas não conseguimos ler.
-    // console.log(`[DEBUG HTML] Dump parcial:`, htmlText.substring(0, 1000));
     
-    return res.json({ success: false, price: null, error: 'Item não encontrado ou layout mudou.' });
+    return res.json({ success: false, price: null, error: 'Preço não encontrado (layout mudou ou sem ofertas).' });
 
   } catch (error) {
     console.error(`[ERRO CRÍTICO] ${item}:`, error.message);
