@@ -305,18 +305,32 @@ const App: React.FC = () => {
       saveData(newList, settings);
   };
 
-  const acknowledgeAll = () => {
+  const acknowledgeAll = async () => {
     if (confirm("Marcar tudo como visto?")) {
+      // Otimista: atualiza UI
       const newList = items.map(i => ({ ...i, isAck: true, hasPriceDrop: false }));
       setItems(newList);
-      saveData(newList, settings);
+      
+      // Envia comando seguro para o backend (não envia DB inteiro)
+      try {
+        await fetch('/api/ack-all', { method: 'POST' });
+      } catch (e) {
+        console.error("Failed to ack all", e);
+      }
     }
   };
   
-  const acknowledgeItem = (id: string) => {
+  const acknowledgeItem = async (id: string) => {
+      // Otimista: atualiza UI imediatamente
       const newList = items.map(i => i.id === id ? { ...i, isAck: true, hasPriceDrop: false } : i);
       setItems(newList);
-      saveData(newList, settings);
+
+      // Envia comando seguro para o backend
+      try {
+          await fetch(`/api/ack/${id}`, { method: 'POST' });
+      } catch (e) {
+          console.error("Failed to ack item", e);
+      }
   };
 
   const saveEdit = () => {

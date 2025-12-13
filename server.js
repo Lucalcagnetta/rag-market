@@ -42,21 +42,15 @@ const saveDB = () => {
 };
 
 // --- LIMPEZA DE INICIALIZAÇÃO ---
-// Corrige itens que ficaram presos com erros de JSON ou travados
 const cleanStartupData = () => {
   let changed = false;
   GLOBAL_DB.items = GLOBAL_DB.items.map(item => {
-    // Se tiver aquele erro de JSON específico, reseta
     if (item.status === 'ERRO' && item.message && item.message.includes('Unexpected token')) {
-      console.log(`[FIX] Resetando item com erro JSON: ${item.name}`);
       changed = true;
       return { ...item, status: 'IDLE', nextUpdate: 0, message: undefined };
     }
-    // Se ficou travado em LOADING por desligamento incorreto
     if (item.status === 'LOADING') {
-      console.log(`[FIX] Destravando item no boot: ${item.name}`);
       changed = true;
-      // Remove prop interna se existir
       const { _loadingStart, ...rest } = item;
       return { ...rest, status: 'IDLE', nextUpdate: 0 };
     }
@@ -70,7 +64,6 @@ cleanStartupData();
 app.use(cors());
 app.use(express.json());
 
-// Log básico
 app.use((req, res, next) => {
   if (req.url !== '/api/health' && req.url !== '/api/db') { 
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
@@ -93,7 +86,6 @@ const parsePriceString = (str) => {
   return parseInt(numericStr, 10);
 };
 
-// Função Interna de Scraping
 const performScrape = async (item, cookie) => {
   let userCookie = cookie || ''; 
   if (userCookie) userCookie = userCookie.replace(/[\r\n]+/g, '').trim();
@@ -108,7 +100,7 @@ const performScrape = async (item, cookie) => {
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
     const response = await fetch(targetUrl, { 
       method: 'GET', 
@@ -132,30 +124,26 @@ const performScrape = async (item, cookie) => {
         return { success: false, price: null, error: 'Precisa de novo Cookie' };
     }
 
-    const method1Regex = />\s*([0-9]{1,3}(?:[.,\s]?[0-9]{3})*)\s*z\s*</i;
-    const match1 = htmlText.match(method1Regex);
-
-    if (match1) {
-        const val = parsePriceString(match1[1]);
-        if (val > 100 && val < 1000000000 && val !== 20000000) {
-             return { success: true, price: val };
-        }
-    }
-
-    const method2Regex = />\s*([0-9,\.\s]+)\s*(?:z|Zeny)?\s*</gi;
-    const matches2 = [...htmlText.matchAll(method2Regex)];
+    // --- REGEX MELHORADA ---
+    // Procura especificamente por números seguidos de 'z' ou 'Zeny'.
+    // Removemos a opção do 'z' ser opcional para evitar pegar datas ou quantidades.
+    const strictPriceRegex = />\s*([0-9]{1,3}(?:[.,\s]?[0-9]{3})*)\s*(?:z|Zeny)\s*</gi;
+    const matches = [...htmlText.matchAll(strictPriceRegex)];
+    
     let minPrice = Infinity;
     let found = false;
 
-    for (const m of matches2) {
+    for (const m of matches) {
         const val = parsePriceString(m[1]);
-        if (!isNaN(val) && val > 100 && val < 1000000000) {
+        if (!isNaN(val) && val > 100 && val < 2000000000) {
+            // Ignora valores que parecem anos (2024, 2025) a menos que sejam muito específicos
+            if (val === 2023 || val === 2024 || val === 2025 || val === 2026) continue;
+            // Ignora valor máximo padrão de busca (20kk exatos as vezes é placeholder)
             if (val === 20000000) continue;
-            if (val !== 2023 && val !== 2024 && val !== 2025 && val !== 2026) {
-                if (val < minPrice) {
-                    minPrice = val;
-                    found = true;
-                }
+
+            if (val < minPrice) {
+                minPrice = val;
+                found = true;
             }
         }
     }
@@ -183,19 +171,23 @@ app.get('/api/db', (req, res) => {
   res.json(GLOBAL_DB);
 });
 
+// POST DB COMPLETO (Usado para adicionar/remover itens)
 app.post('/api/db', (req, res) => {
   try {
     const { items, settings } = req.body;
     if (!Array.isArray(items) || typeof settings !== 'object') {
       return res.status(400).json({ error: 'Formato inválido' });
     }
-    // Ao receber dados do front, preservamos _loadingStart se existir nos itens do banco atual
-    // para evitar que o front (que desconhece essa prop) a apague acidentalmente
+    
+    // Preserva loadingStart para não quebrar items em andamento
     const newItems = items.map(newItem => {
         const existing = GLOBAL_DB.items.find(i => i.id === newItem.id);
         if (existing && existing._loadingStart) {
             return { ...newItem, _loadingStart: existing._loadingStart };
         }
+        // Se o frontend mandar algo antigo, preservamos o estado do backend se for mais recente?
+        // Difícil sincronizar sem complexidade. Vamos confiar no array do frontend para ADD/REMOVE,
+        // mas as rotas de ACK abaixo evitam o problema de sobrescrita de status.
         return newItem;
     });
 
@@ -209,13 +201,36 @@ app.post('/api/db', (req, res) => {
   }
 });
 
+// NOVA ROTA: ACK ITEM (Marca como visto sem sobrescrever tudo)
+app.post('/api/ack/:id', (req, res) => {
+    const { id } = req.params;
+    const item = GLOBAL_DB.items.find(i => i.id === id);
+    if (item) {
+        item.isAck = true;
+        item.hasPriceDrop = false;
+        saveDB();
+        console.log(`[API] Item ${item.name} marcado como visto.`);
+        res.json({ success: true });
+    } else {
+        res.status(404).json({ error: 'Item not found' });
+    }
+});
+
+// NOVA ROTA: ACK ALL
+app.post('/api/ack-all', (req, res) => {
+    GLOBAL_DB.items.forEach(i => {
+        i.isAck = true;
+        i.hasPriceDrop = false;
+    });
+    saveDB();
+    console.log(`[API] Todos os itens marcados como visto.`);
+    res.json({ success: true });
+});
+
 app.get('/api/search', async (req, res) => {
     const { item } = req.query;
     const cookie = req.headers['x-ro-cookie'] || GLOBAL_DB.settings.cookie;
-    
     if (!item) return res.status(400).json({ success: false, error: 'Item missing' });
-    
-    console.log(`[LEGACY] Cliente antigo pediu busca manual para: ${item}`);
     const result = await performScrape(item.toString(), cookie);
     res.json(result);
 });
@@ -225,124 +240,96 @@ app.get('/api/health', (req, res) => {
 });
 
 // =======================================================
-// BACKGROUND AUTOMATION LOOPS (DUAL WORKERS + WATCHDOG)
+// AUTOMATION LOOPS
 // =======================================================
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; 
 const LOOP_TICK_MS = 2000; 
 
-// Watchdog: Garante que nada fique preso em LOADING pra sempre
 const startWatchdog = () => {
   setInterval(() => {
     if (!GLOBAL_DB.settings?.isRunning) return;
-    
     const now = Date.now();
     let changed = false;
-
     GLOBAL_DB.items = GLOBAL_DB.items.map(item => {
-       // Se está carregando E (tem timestamp antigo OU não tem timestamp mas está carregando)
        if (item.status === 'LOADING') {
-          // Timeout de segurança de 45s (fetch tem timeout de 20s)
           const isStuck = item._loadingStart ? (now - item._loadingStart > 45000) : true;
-          
           if (isStuck) {
-             console.log(`[WATCHDOG] 🐕 Destravando item preso: ${item.name}`);
              changed = true;
-             // Limpa props internas
              const { _loadingStart, ...rest } = item; 
-             return { 
-                 ...rest, 
-                 status: 'ERRO', 
-                 message: 'Timeout (Destravado)', 
-                 nextUpdate: now + 5000 // Tenta de novo em 5s
-             };
+             return { ...rest, status: 'ERRO', message: 'Timeout', nextUpdate: now + 5000 };
           }
        }
        return item;
     });
-
     if (changed) saveDB();
-  }, 15000); // Roda a cada 15s
+  }, 15000);
 };
 
-// Função auxiliar para processar um item
 const processItem = async (item, workerName) => {
   console.log(`[${workerName}] Verificando: ${item.name}`);
-  
-  // 1. Marca imediatamente com timestamp de inicio
   item.status = 'LOADING';
   item._loadingStart = Date.now();
   saveDB(); 
 
-  // 2. Processa
   const result = await performScrape(item.name, GLOBAL_DB.settings.cookie);
   
   const newPrice = result.price;
   const oldPrice = item.lastPrice;
   const isSuccess = result.success;
 
-  // Lógica de Negócio
   const isDeal = isSuccess && newPrice !== null && newPrice > 0 && newPrice <= item.targetPrice;
+  // Se oldPrice era null, consideramos que AGORA sabemos o preço, mas só notificamos se for Deal.
+  // wasDeal previne spam se o preço se mantiver baixo.
   const wasDeal = oldPrice !== null && oldPrice > 0 && oldPrice <= item.targetPrice;
   
-  const isPriceDrop = isSuccess && 
-                      newPrice !== null && 
-                      oldPrice !== null && 
-                      newPrice > 0 && 
-                      oldPrice > 0 && 
-                      newPrice < oldPrice;
+  const isPriceDrop = isSuccess && newPrice !== null && oldPrice !== null && newPrice > 0 && oldPrice > 0 && newPrice < oldPrice;
 
+  // Só reseta o ACK se: 
+  // 1. O preço caiu mais ainda (isPriceDrop)
+  // 2. OU se virou um Deal agora e não era antes (ex: usuário mudou alvo ou preço caiu abaixo do alvo)
   const shouldResetAck = isPriceDrop || (isDeal && !wasDeal);
 
-  // 3. Atualiza Objeto e Limpa timestamp interno
   delete item._loadingStart;
-  
   item.lastPrice = newPrice;
   item.lastUpdated = new Date().toISOString();
   item.status = isSuccess ? (newPrice === 0 ? 'ALERTA' : 'OK') : 'ERRO';
   item.message = result.error ? `[${workerName}] ${result.error}` : undefined;
   item.nextUpdate = isSuccess ? (Date.now() + UPDATE_INTERVAL_MS) : (Date.now() + 60000);
   
+  // IMPORTANTE: Só alteramos isAck para FALSE. Nunca para TRUE aqui.
   if (shouldResetAck) {
      item.isAck = false;
      if (isPriceDrop) item.hasPriceDrop = true;
-     console.log(`✨ [${workerName}] ALERTA: ${item.name} caiu/oferta!`);
+     console.log(`✨ [${workerName}] ALERTA: ${item.name}`);
   }
 
   saveDB();
 };
 
 const startAutomationLoop = () => {
-  console.log("🚀 Automação de Background Iniciada (Modo Dual: TOP & BOT)");
+  console.log("🚀 Automação de Background Iniciada");
   startWatchdog();
   
-  // WORKER 1: Cima para Baixo (TOP)
   setInterval(async () => {
     if (!GLOBAL_DB.settings?.isRunning) return;
     const h = new Date().getHours();
     if (h >= 1 && h < 8) return;
-
     const now = Date.now();
     const candidates = GLOBAL_DB.items.filter(i => i.nextUpdate <= now && i.status !== 'LOADING');
-
     if (candidates.length > 0) {
-      const item = candidates[0];
-      await processItem(item, "TOP");
+      await processItem(candidates[0], "TOP");
     }
   }, LOOP_TICK_MS);
 
-  // WORKER 2: Baixo para Cima (BOT)
   setTimeout(() => {
     setInterval(async () => {
       if (!GLOBAL_DB.settings?.isRunning) return;
       const h = new Date().getHours();
       if (h >= 1 && h < 8) return;
-
       const now = Date.now();
       const candidates = GLOBAL_DB.items.filter(i => i.nextUpdate <= now && i.status !== 'LOADING');
-
       if (candidates.length > 0) {
-        const item = candidates[candidates.length - 1];
-        await processItem(item, "BOT");
+        await processItem(candidates[candidates.length - 1], "BOT");
       }
     }, LOOP_TICK_MS);
   }, 1000); 
@@ -354,7 +341,7 @@ app.get('*', (req, res) => {
   if (fs.existsSync(join(distPath, 'index.html'))) {
     res.sendFile(join(distPath, 'index.html'));
   } else {
-    res.send('Backend Server Online. Dual Workers + Watchdog Running.');
+    res.send('Backend Server Online.');
   }
 });
 
