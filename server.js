@@ -124,31 +124,55 @@ const performScrape = async (item, cookie) => {
         return { success: false, price: null, error: 'Precisa de novo Cookie' };
     }
 
-    // --- REGEX MELHORADA ---
-    // Procura especificamente por números seguidos de 'z' ou 'Zeny'.
-    // Removemos a opção do 'z' ser opcional para evitar pegar datas ou quantidades.
-    const strictPriceRegex = />\s*([0-9]{1,3}(?:[.,\s]?[0-9]{3})*)\s*(?:z|Zeny)\s*</gi;
-    const matches = [...htmlText.matchAll(strictPriceRegex)];
+    // --- ESTRATÉGIA DE EXTRAÇÃO DE PREÇO ---
     
-    let minPrice = Infinity;
-    let found = false;
+    // 1. TENTATIVA ESTRITA (Procura 'z' ou 'Zeny' junto do número)
+    // Isso é o ideal para evitar pegar Quantidade ou Datas.
+    const strictPriceRegex = />\s*([0-9]{1,3}(?:[.,\s]?[0-9]{3})*)\s*(?:z|Zeny)\s*</gi;
+    let matches = [...htmlText.matchAll(strictPriceRegex)];
+    let prices = [];
 
-    for (const m of matches) {
-        const val = parsePriceString(m[1]);
-        if (!isNaN(val) && val > 100 && val < 2000000000) {
-            // Ignora valores que parecem anos (2024, 2025) a menos que sejam muito específicos
-            if (val === 2023 || val === 2024 || val === 2025 || val === 2026) continue;
-            // Ignora valor máximo padrão de busca (20kk exatos as vezes é placeholder)
-            if (val === 20000000) continue;
+    // Se encontrou com 'z', confiamos nesses valores
+    if (matches.length > 0) {
+        for (const m of matches) {
+            const val = parsePriceString(m[1]);
+            // Filtros básicos de sanidade
+            if (!isNaN(val) && val > 0 && val < 9999999999) {
+                 // Filtra placeholders de busca comum
+                 if (val === 20000000) continue; 
+                 prices.push(val);
+            }
+        }
+    } 
+    
+    // 2. FALLBACK (Se não achou com 'z', procura números soltos mas com filtro rigoroso)
+    // Alguns itens no site podem não ter o 'z' dentro da mesma tag HTML
+    if (prices.length === 0) {
+        const loosePriceRegex = />\s*([0-9]{1,3}(?:[.,\s]?[0-9]{3})*)\s*</gi;
+        matches = [...htmlText.matchAll(loosePriceRegex)];
+        
+        for (const m of matches) {
+            const val = parsePriceString(m[1]);
+            if (!isNaN(val)) {
+                // FILTROS RIGOROSOS PARA O FALLBACK:
+                
+                // 1. Ignora anos atuais/próximos (evita datas de postagem)
+                if (val >= 2023 && val <= 2030) continue;
+                
+                // 2. Ignora quantidades pequenas (assumimos que ninguém rastreia itens de < 500z)
+                // A maioria das quantidades é 1, 5, 10, 50, 100.
+                if (val < 500) continue;
 
-            if (val < minPrice) {
-                minPrice = val;
-                found = true;
+                // 3. Ignora placeholders conhecidos
+                if (val === 20000000) continue;
+
+                prices.push(val);
             }
         }
     }
 
-    if (found && minPrice !== Infinity) {
+    if (prices.length > 0) {
+        const minPrice = Math.min(...prices);
         return { success: true, price: minPrice };
     }
 
