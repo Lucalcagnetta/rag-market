@@ -224,36 +224,34 @@ const App: React.FC = () => {
       const aHasDrop = !!a.hasPriceDrop;
       const bHasDrop = !!b.hasPriceDrop;
 
+      // "Active" = Alerta não visto (Prioridade Absoluta)
       const aActive = (aIsDeal || aHasDrop) && !a.isAck;
       const bActive = (bIsDeal || bHasDrop) && !b.isAck;
 
-      // 1. Alertas Não Vistos (Prioridade Máxima) - Piscando
+      // 1. Alertas Não Vistos - TOPO DA LISTA (Piscando)
       if (aActive && !bActive) return -1;
       if (!aActive && bActive) return 1;
 
-      // Se ambos ativos, o mais recente primeiro (para ver o último que apitou)
+      // Se ambos são alertas não vistos, ordena por NOME para estabilidade (não ficar pulando)
       if (aActive && bActive) {
-         const timeA = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
-         const timeB = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
-         return timeB - timeA;
+         return a.name.localeCompare(b.name);
       }
 
-      // 2. Itens Interessantes (Ofertas ou Quedas) - Já vistos
-      if (aIsDeal || aHasDrop || bIsDeal || bHasDrop) {
-          const aInteresting = aIsDeal || aHasDrop;
-          const bInteresting = bIsDeal || bHasDrop;
+      // 2. Itens Interessantes (Ofertas ou Quedas) JÁ VISTOS
+      // Estes ficam logo abaixo dos alertas ativos
+      const aInteresting = aIsDeal || aHasDrop;
+      const bInteresting = bIsDeal || bHasDrop;
 
-          if (aInteresting && !bInteresting) return -1;
-          if (!aInteresting && bInteresting) return 1;
+      if (aInteresting && !bInteresting) return -1;
+      if (!aInteresting && bInteresting) return 1;
 
-          // Entre dois interessantes, prioriza OFERTA
+      if (aInteresting && bInteresting) {
+          // Entre dois interessantes, prioriza OFERTA (Verde)
           if (aIsDeal && !bIsDeal) return -1;
           if (!aIsDeal && bIsDeal) return 1;
 
-          // Se iguais, mais recente primeiro
-          const timeA = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
-          const timeB = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
-          return timeB - timeA;
+          // Se forem iguais, ordena por nome
+          return a.name.localeCompare(b.name);
       }
 
       // 3. Itens Normais (Ordena por Nome)
@@ -326,6 +324,8 @@ const App: React.FC = () => {
               const oldPrice = i.lastPrice;
               
               const isDeal = isSuccess && newPrice !== null && newPrice > 0 && newPrice <= i.targetPrice;
+              // Verifica se JÁ ERA um deal antes
+              const wasDeal = oldPrice !== null && oldPrice > 0 && oldPrice <= i.targetPrice;
               
               const isPriceDrop = isSuccess && 
                                   newPrice !== null && 
@@ -334,10 +334,18 @@ const App: React.FC = () => {
                                   oldPrice > 0 && 
                                   newPrice < oldPrice;
 
-              if (isDeal) foundDeal = true;
-              else if (isPriceDrop) foundDrop = true;
+              // Lógica de Notificação e Reset de Visto (Ack):
+              // Resetamos o "Visto" (isAck = false) APENAS SE:
+              // 1. O preço caiu (isPriceDrop) - Sempre avisa se ficar mais barato.
+              // 2. Virou um Deal e NÃO era antes (Novo Deal).
+              // OBS: Se já era Deal e o preço não mudou (ou subiu mas continua abaixo do alvo), 
+              // mantemos o isAck do usuário para não incomodar.
+              const shouldResetAck = isPriceDrop || (isDeal && !wasDeal);
 
-              const shouldAlert = isDeal || isPriceDrop;
+              if (shouldResetAck) {
+                if (isDeal) foundDeal = true;
+                else if (isPriceDrop) foundDrop = true;
+              }
 
               const nextTime = isSuccess 
                  ? Date.now() + UPDATE_INTERVAL_MS 
@@ -350,7 +358,7 @@ const App: React.FC = () => {
                 status: isSuccess ? (newPrice === 0 ? Status.ALERTA : Status.OK) : Status.ERRO,
                 message: result.error || undefined,
                 nextUpdate: nextTime,
-                isAck: shouldAlert ? false : i.isAck,
+                isAck: shouldResetAck ? false : i.isAck, // Mantém status de visto se não houver novidade
                 hasPriceDrop: isPriceDrop ? true : (isSuccess ? false : i.hasPriceDrop)
               };
             });
@@ -417,13 +425,24 @@ const App: React.FC = () => {
 
   const formatMoney = (val: number | null) => {
     if (val === null) return '--';
+
+    // Helper para truncar casas decimais sem arredondar para cima
+    const floorValue = (value: number, decimals: number) => {
+      const factor = Math.pow(10, decimals);
+      return Math.floor(value * factor) / factor;
+    };
+
     if (val >= 1000000) {
        const inMillions = val / 1000000;
-       return inMillions.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + 'kk';
+       // Ex: 24.999 -> 24.99
+       const displayVal = floorValue(inMillions, 2); 
+       return displayVal.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + 'kk';
     }
     if (val >= 1000) {
        const inThousands = val / 1000;
-       return inThousands.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + 'k';
+       // Ex: 1.99 -> 1.9
+       const displayVal = floorValue(inThousands, 1);
+       return displayVal.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + 'k';
     }
     return val.toLocaleString('pt-BR'); 
   };
