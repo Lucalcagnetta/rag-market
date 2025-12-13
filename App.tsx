@@ -86,7 +86,6 @@ const playDealSound = () => {
   }
 };
 
-// Configurações restauradas (Reversão para Batch=2 que era mais rápido)
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; // 2 Minutes
 const SAFETY_DELAY_MS = 2000; // 2s de delay entre lotes
 const BATCH_SIZE = 2; // Processa 2 por vez
@@ -112,7 +111,6 @@ const App: React.FC = () => {
 
   // Editing State
   const [editingItem, setEditingItem] = useState<Item | null>(null);
-  // Estado local para o input de preço no modal de edição (para permitir digitar 'kk')
   const [editingTargetInput, setEditingTargetInput] = useState<string>('');
 
   // -- Refs for loop control --
@@ -188,22 +186,46 @@ const App: React.FC = () => {
       const aIsDeal = a.lastPrice !== null && a.lastPrice > 0 && a.lastPrice <= a.targetPrice;
       const bIsDeal = b.lastPrice !== null && b.lastPrice > 0 && b.lastPrice <= b.targetPrice;
       
-      const aActive = (aIsDeal || a.hasPriceDrop) && !a.isAck;
-      const bActive = (bIsDeal || b.hasPriceDrop) && !b.isAck;
+      const aHasDrop = !!a.hasPriceDrop;
+      const bHasDrop = !!b.hasPriceDrop;
 
-      // 1. Prioridade para alertas não vistos (piscando)
+      const aActive = (aIsDeal || aHasDrop) && !a.isAck;
+      const bActive = (bIsDeal || bHasDrop) && !b.isAck;
+
+      // 1. Alertas Não Vistos (Prioridade Máxima) - Piscando
       if (aActive && !bActive) return -1;
       if (!aActive && bActive) return 1;
 
-      // 2. Prioridade para Ofertas Ativas (mesmo vistas)
-      if (aIsDeal && !bIsDeal) return -1;
-      if (!aIsDeal && bIsDeal) return 1;
+      // Se ambos ativos, o mais recente primeiro (para ver o último que apitou)
+      if (aActive && bActive) {
+         const timeA = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
+         const timeB = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
+         return timeB - timeA;
+      }
 
-      // 3. Ordenação Cronológica (Mais recente primeiro)
-      const timeA = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
-      const timeB = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
+      // 2. Itens Interessantes (Ofertas ou Quedas) - Já vistos
+      // O usuário quer: "que ficou mais barato do que estava ao topo"
+      const aInteresting = aIsDeal || aHasDrop;
+      const bInteresting = bIsDeal || bHasDrop;
 
-      return timeB - timeA; 
+      if (aInteresting && !bInteresting) return -1;
+      if (!aInteresting && bInteresting) return 1;
+
+      if (aInteresting && bInteresting) {
+          // Entre dois interessantes, prioriza OFERTA (abaixo do alvo)
+          if (aIsDeal && !bIsDeal) return -1;
+          if (!aIsDeal && bIsDeal) return 1;
+
+          // Se forem iguais (ambos ofertas ou ambos drops), o mais recente primeiro
+          const timeA = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
+          const timeB = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
+          return timeB - timeA;
+      }
+
+      // 3. Itens Normais (Sem novidade, preço igual ou subiu)
+      // Ordena por Nome para manter a lista estável e não pular itens inúteis pro topo
+      // "e não o ultimo item que foi feita uma busca"
+      return a.name.localeCompare(b.name);
     });
   }, []);
 
@@ -221,7 +243,7 @@ const App: React.FC = () => {
       setIsNightPause(isSleepTime);
       if (isSleepTime) return;
 
-      // WATCHDOG: Se estiver processando há muito tempo (>30s), destrava
+      // WATCHDOG
       if (processingRef.current) {
         if (Date.now() - processingStartTimeRef.current > WATCHDOG_TIMEOUT_MS) {
            console.warn("⚠️ Watchdog: Processamento travado detectado. Reiniciando fila.");
@@ -235,7 +257,6 @@ const App: React.FC = () => {
 
       const currentItems = itemsRef.current;
       
-      // Busca candidatos (LOTE de tamanho BATCH_SIZE)
       const candidates = currentItems
         .filter(i => i.nextUpdate <= now && i.status !== Status.LOADING)
         .slice(0, BATCH_SIZE);
@@ -244,12 +265,10 @@ const App: React.FC = () => {
         processingRef.current = true;
         processingStartTimeRef.current = Date.now();
         
-        // Marca como LOADING
         const candidateIds = candidates.map(c => c.id);
         setItems(prev => prev.map(i => candidateIds.includes(i.id) ? { ...i, status: Status.LOADING } : i));
 
         try {
-          // Dispara requisições em paralelo (Promise.all)
           const promises = candidates.map(candidate => 
              fetchPrice(
                 candidate.name, 
@@ -275,7 +294,6 @@ const App: React.FC = () => {
               const newPrice = result.price;
               const oldPrice = i.lastPrice;
               
-              // Verifica se é oferta (Deal)
               const isDeal = isSuccess && newPrice !== null && newPrice > 0 && newPrice <= i.targetPrice;
               
               // Verifica se houve queda (Drop)
@@ -291,7 +309,6 @@ const App: React.FC = () => {
 
               const shouldAlert = isDeal || isPriceDrop;
 
-              // Próximo update em 2 min (sucesso) ou 30s (erro)
               const nextTime = isSuccess 
                  ? Date.now() + UPDATE_INTERVAL_MS 
                  : Date.now() + 30000; 
@@ -308,11 +325,10 @@ const App: React.FC = () => {
               };
             });
 
-            // Lógica de Som Diferenciada
             if (foundDeal) {
-                playDealSound(); // Som Especial (Alvo atingido)!
+                playDealSound();
             } else if (foundDrop) {
-                playPriceDropSound(); // Som Comum (Só caiu o preço)
+                playPriceDropSound();
             }
             
             return updatedList; 
@@ -320,13 +336,12 @@ const App: React.FC = () => {
 
         } catch (e) {
           console.error("Erro no lote:", e);
-          // Libera o lote em caso de erro fatal
           setItems(prev => prev.map(i => candidateIds.includes(i.id) ? { ...i, status: Status.ERRO, nextUpdate: Date.now() + 60000 } : i));
         } finally {
           processingRef.current = false;
         }
       }
-    }, 1000); // Check loop a cada 1s
+    }, 1000);
 
     return () => clearInterval(intervalId);
   }, []);
@@ -360,20 +375,14 @@ const App: React.FC = () => {
 
   const formatMoney = (val: number | null) => {
     if (val === null) return '--';
-    
-    // Se for maior que 1 milhão, usa 'kk'
     if (val >= 1000000) {
        const inMillions = val / 1000000;
-       // Se for inteiro (ex: 20.0), não mostra decimal. Se for quebrado (1.5), mostra até 2 casas
        return inMillions.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + 'kk';
     }
-    
-    // Se for maior que 1 mil, usa 'k'
     if (val >= 1000) {
        const inThousands = val / 1000;
        return inThousands.toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + 'k';
     }
-
     return val.toLocaleString('pt-BR'); 
   };
 
@@ -405,13 +414,11 @@ const App: React.FC = () => {
 
   const handleEditClick = (item: Item) => {
     setEditingItem({ ...item });
-    // Preenche o input temporário com o formato "kk" se aplicável
     setEditingTargetInput(formatMoney(item.targetPrice).replace('z', '').trim());
   };
 
   const saveEdit = () => {
     if (!editingItem) return;
-    // O valor já deve ter sido atualizado no onChange do input, mas garantimos aqui
     setItems(prev => prev.map(i => i.id === editingItem.id ? editingItem : i));
     setEditingItem(null);
   };
@@ -486,7 +493,7 @@ const App: React.FC = () => {
                      const val = parseKkInput(e.target.value);
                      setEditingItem({...editingItem, targetPrice: val});
                   }}
-                  placeholder="Ex: 1kk"
+                  placeholder="Ex: 350kk"
                   className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-2 text-white focus:border-blue-500 outline-none"
                 />
                 <span className="text-[10px] text-slate-500">Valor real: {editingItem.targetPrice.toLocaleString()} z</span>
