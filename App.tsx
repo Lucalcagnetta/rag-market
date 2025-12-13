@@ -77,16 +77,22 @@ const App: React.FC = () => {
         osc.type = 'square';
         osc.frequency.setValueAtTime(523.25, now);
         osc.frequency.setValueAtTime(1046.50, now + 0.15);
-        gain.gain.setValueAtTime(0.05, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+        
+        // VOLUME AUMENTADO (De 0.05 para 0.3)
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+        
         osc.start(now);
         osc.stop(now + 0.6);
       } else {
         osc.type = 'sine';
         osc.frequency.setValueAtTime(880, now);
         osc.frequency.exponentialRampToValueAtTime(440, now + 0.3);
-        gain.gain.setValueAtTime(0.1, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+        
+        // VOLUME AUMENTADO (De 0.1 para 0.4)
+        gain.gain.setValueAtTime(0.4, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+        
         osc.start(now);
         osc.stop(now + 0.3);
       }
