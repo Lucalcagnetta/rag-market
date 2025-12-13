@@ -16,7 +16,8 @@ import {
   RefreshCw,
   Moon,
   Volume2,
-  VolumeX
+  VolumeX,
+  Calculator
 } from 'lucide-react';
 
 const SYNC_INTERVAL_MS = 2000; // Sincroniza com servidor a cada 2s
@@ -33,6 +34,10 @@ const App: React.FC = () => {
     return saved !== null ? parseFloat(saved) : 0.5;
   });
   const [showVolumeControl, setShowVolumeControl] = useState(false);
+
+  // -- Calculator State --
+  const [calcPrice, setCalcPrice] = useState('');
+  const [calcQty, setCalcQty] = useState('');
 
   // Local state for settings form
   const [tempSettings, setTempSettings] = useState<Settings>(settings);
@@ -275,6 +280,12 @@ const App: React.FC = () => {
     if (val >= 1000) return floorValue(val / 1000, 1).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + 'k';
     return val.toLocaleString('pt-BR'); 
   };
+  
+  const calcTotal = () => {
+    const p = parseFloat(calcPrice.replace(',', '.')) || 0;
+    const q = parseFloat(calcQty.replace(',', '.')) || 0;
+    return (p * q).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  };
 
   const addNewItem = () => {
     initAudio();
@@ -434,6 +445,43 @@ const App: React.FC = () => {
            </div>
         </div>
         
+        {/* CALCULADORA (PC ONLY) */}
+        <div className="hidden md:flex items-center gap-2 bg-slate-800/50 border border-slate-700 p-2 rounded-lg">
+           <div className="flex flex-col">
+              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Preço KK</span>
+              <div className="flex items-center bg-slate-900 border border-slate-700 rounded px-2 py-1 w-24">
+                 <span className="text-xs text-slate-500 mr-1">R$</span>
+                 <input 
+                   className="w-full bg-transparent text-xs font-mono text-white focus:outline-none"
+                   placeholder="0,00"
+                   value={calcPrice}
+                   onChange={e => setCalcPrice(e.target.value)}
+                 />
+              </div>
+           </div>
+           <span className="text-slate-500 mt-4">×</span>
+           <div className="flex flex-col">
+              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Qtd</span>
+              <div className="flex items-center bg-slate-900 border border-slate-700 rounded px-2 py-1 w-20">
+                 <input 
+                   className="w-full bg-transparent text-xs font-mono text-white focus:outline-none text-center"
+                   placeholder="0"
+                   value={calcQty}
+                   onChange={e => setCalcQty(e.target.value)}
+                 />
+              </div>
+           </div>
+           <span className="text-slate-500 mt-4">=</span>
+           <div className="flex flex-col">
+              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Total</span>
+              <div className="flex items-center bg-slate-900 border border-slate-700 rounded px-2 py-1 min-w-[90px] justify-center">
+                 <span className="text-xs font-mono text-emerald-400 font-bold">
+                    {calcTotal()}
+                 </span>
+              </div>
+           </div>
+        </div>
+
         <div className="flex gap-2 items-center">
            {activeAlertsCount > 0 && (
              <button onClick={acknowledgeAll} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs flex items-center gap-1 animate-pulse mr-2">
