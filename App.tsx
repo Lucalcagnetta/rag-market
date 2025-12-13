@@ -20,7 +20,8 @@ import {
   Sun,
   TrendingDown,
   ListChecks,
-  Zap
+  Zap,
+  Clock
 } from 'lucide-react';
 
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; // 2 Minutes
@@ -546,7 +547,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#0d1117] text-slate-200 p-4 md:p-8 font-sans relative">
+    <div className="min-h-screen bg-[#0d1117] text-slate-200 p-2 md:p-8 font-sans relative">
       
       <style>{`
         @keyframes pulse-green {
@@ -566,7 +567,7 @@ const App: React.FC = () => {
 
       {/* MODAL DE EDIÇÃO */}
       {editingItem && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 backdrop-blur-sm animate-in fade-in duration-200 p-4">
           <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-lg w-full max-w-md shadow-2xl">
             <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
               <Edit2 size={20} className="text-blue-500" /> Editar Item
@@ -588,7 +589,6 @@ const App: React.FC = () => {
                   value={editingTargetInput}
                   onChange={(e) => {
                      setEditingTargetInput(e.target.value);
-                     // LÓGICA INTELIGENTE APLICADA AQUI TAMBÉM
                      const val = parseKkInput(e.target.value);
                      setEditingItem({...editingItem, targetPrice: val});
                   }}
@@ -605,7 +605,7 @@ const App: React.FC = () => {
                 <button 
                   onClick={saveEdit}
                   className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded font-medium shadow-lg transition"
-                >Salvar Alterações</button>
+                >Salvar</button>
               </div>
             </div>
           </div>
@@ -613,24 +613,24 @@ const App: React.FC = () => {
       )}
 
       {/* Header */}
-      <header className="max-w-6xl mx-auto mb-8 flex flex-col md:flex-row justify-between items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+      <header className="max-w-6xl mx-auto mb-6 md:mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div className="w-full md:w-auto">
+          <h1 className="text-xl md:text-2xl font-bold text-white tracking-tight flex items-center gap-2">
             <Activity className="text-blue-500" />
-            Ragnarok Market Tracker
+            Ragnarok Tracker
           </h1>
-          <div className="flex flex-wrap items-center gap-3 mt-1">
-             <p className="text-xs text-slate-500">Atualização em Lote (2 itens / 2s)</p>
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+             <span className="text-[10px] text-slate-500 border border-slate-700 px-2 py-0.5 rounded">2 itens / 2s</span>
              
              {isRunning && isNightPause && !overrideNightMode && (
                <span className="flex items-center gap-1 text-[10px] bg-yellow-500/10 text-yellow-500 border border-yellow-500/30 px-2 py-0.5 rounded font-medium">
-                 <Moon size={10} /> Pausa Agendada (01h-08h)
+                 <Moon size={10} /> Pausa (01h-08h)
                </span>
              )}
              
              {isRunning && isNightPause && overrideNightMode && (
                <span className="flex items-center gap-1 text-[10px] bg-purple-500/10 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded font-medium animate-pulse">
-                 <Zap size={10} /> Forçando Execução (Noite)
+                 <Zap size={10} /> Forçando Execução
                </span>
              )}
              
@@ -641,44 +641,44 @@ const App: React.FC = () => {
              )}
 
              {saveStatus === 'saving' && <span className="text-[10px] text-blue-400 flex items-center gap-1"><Database size={10} className="animate-bounce" /> Salvando...</span>}
-             {saveStatus === 'saved' && <span className="text-[10px] text-emerald-500 flex items-center gap-1"><CheckCircle2 size={10} /> Sincronizado</span>}
-             {saveStatus === 'error' && <span className="text-[10px] text-red-500 flex items-center gap-1"><X size={10} /> Erro ao salvar</span>}
+             {saveStatus === 'saved' && <span className="text-[10px] text-emerald-500 flex items-center gap-1"><CheckCircle2 size={10} /> Salvo</span>}
+             {saveStatus === 'error' && <span className="text-[10px] text-red-500 flex items-center gap-1"><X size={10} /> Erro Save</span>}
           </div>
         </div>
         
-        <div className="flex gap-3 items-center">
+        <div className="flex gap-2 items-center w-full md:w-auto justify-end">
           {activeAlertsCount > 0 && (
              <button
                onClick={acknowledgeAll}
-               className="px-4 py-2 rounded text-white bg-blue-600 hover:bg-blue-500 border border-blue-500 transition flex items-center gap-2 text-sm shadow-lg animate-pulse"
+               className="flex-1 md:flex-none justify-center px-3 py-2 rounded text-white bg-blue-600 hover:bg-blue-500 border border-blue-500 transition flex items-center gap-2 text-xs md:text-sm shadow-lg animate-pulse"
              >
-               <ListChecks size={16} /> Marcar Todos ({activeAlertsCount})
+               <ListChecks size={14} /> Visto ({activeAlertsCount})
              </button>
           )}
 
           <button 
             onClick={() => setShowSettings(!showSettings)}
-            className={`px-4 py-2 rounded text-slate-200 border transition flex items-center gap-2 text-sm ${showSettings ? 'bg-[#1e293b] border-blue-500' : 'bg-[#161b22] border-[#30363d] hover:bg-[#21262d]'}`}
+            className={`px-3 py-2 rounded text-slate-200 border transition flex items-center gap-2 text-xs md:text-sm ${showSettings ? 'bg-[#1e293b] border-blue-500' : 'bg-[#161b22] border-[#30363d] hover:bg-[#21262d]'}`}
           >
-            <SettingsIcon size={16} /> Config
+            <SettingsIcon size={14} />
           </button>
           
           <button 
             onClick={toggleAutomation}
-            className={`px-6 py-2 rounded font-bold shadow-lg transition flex items-center gap-2 text-sm ${
+            className={`px-4 py-2 rounded font-bold shadow-lg transition flex items-center gap-2 text-xs md:text-sm ${
               isRunning 
               ? 'bg-red-500/10 text-red-400 border border-red-500/50 hover:bg-red-500/20' 
               : 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500'
             }`}
           >
-            {isRunning ? <><Pause size={16} /> PAUSAR</> : <><Play size={16} /> INICIAR</>}
+            {isRunning ? <><Pause size={14} /> PAUSAR</> : <><Play size={14} /> INICIAR</>}
           </button>
         </div>
       </header>
 
       {/* Settings Panel */}
       {showSettings && (
-        <div className="max-w-6xl mx-auto mb-6 bg-[#161b22] border border-[#30363d] rounded-lg p-6 animate-in fade-in slide-in-from-top-4 duration-300">
+        <div className="max-w-6xl mx-auto mb-6 bg-[#161b22] border border-[#30363d] rounded-lg p-4 md:p-6 animate-in fade-in slide-in-from-top-4 duration-300">
           <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-wider flex items-center gap-2">Configurações de Acesso</h3>
           <div className="grid gap-4">
             <div>
@@ -702,9 +702,9 @@ const App: React.FC = () => {
               </label>
               <button 
                 onClick={handleSaveSettings}
-                className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded text-sm font-medium transition flex items-center gap-2"
+                className="w-full md:w-auto bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded text-sm font-medium transition flex items-center justify-center gap-2"
               >
-                <Save size={16} /> SALVAR E SINCRONIZAR
+                <Save size={16} /> SALVAR
               </button>
             </div>
           </div>
@@ -712,12 +712,12 @@ const App: React.FC = () => {
       )}
 
       {/* Main Content */}
-      <main className="max-w-6xl mx-auto bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden shadow-2xl">
+      <main className="max-w-6xl mx-auto bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden shadow-2xl mb-10">
         
         {/* Add Item Bar */}
-        <div className="p-4 border-b border-[#30363d] bg-[#0d1117] flex flex-wrap gap-4 items-end">
-          <div className="flex-1 min-w-[200px]">
-            <label className="block text-xs text-slate-500 mb-1 font-mono">ADICIONAR ITEM</label>
+        <div className="p-4 border-b border-[#30363d] bg-[#0d1117] flex flex-col md:flex-row gap-4 items-end">
+          <div className="w-full md:flex-1">
+            <label className="block text-xs text-slate-500 mb-1 font-mono">NOME DO ITEM</label>
             <input 
               type="text" 
               value={newItemName}
@@ -727,27 +727,27 @@ const App: React.FC = () => {
               onKeyDown={(e) => e.key === 'Enter' && addNewItem()}
             />
           </div>
-          <div className="w-40">
+          <div className="w-full md:w-40">
             <label className="block text-xs text-slate-500 mb-1 font-mono">PREÇO ALVO</label>
             <input 
               type="text" 
               value={newItemTarget}
               onChange={(e) => setNewItemTarget(e.target.value)}
-              placeholder="Ex: 30 (entende 30kk)"
+              placeholder="Ex: 30 (30kk)"
               className="w-full bg-[#161b22] border border-[#30363d] rounded px-3 py-2 text-sm focus:border-blue-500 outline-none text-white placeholder-slate-600"
               onKeyDown={(e) => e.key === 'Enter' && addNewItem()}
             />
           </div>
           <button 
             onClick={addNewItem}
-            className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-medium transition flex items-center gap-2"
+            className="w-full md:w-auto bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-medium transition flex items-center justify-center gap-2"
           >
             <Plus size={16} /> ADICIONAR
           </button>
         </div>
 
-        {/* Table Header */}
-        <div className="grid grid-cols-12 gap-4 px-6 py-3 bg-[#161b22] border-b border-[#30363d] text-xs font-bold text-slate-500 uppercase tracking-wider">
+        {/* Table Header (Hidden on Mobile) */}
+        <div className="hidden md:grid grid-cols-12 gap-4 px-6 py-3 bg-[#161b22] border-b border-[#30363d] text-xs font-bold text-slate-500 uppercase tracking-wider">
           <div className="col-span-4">Item</div>
           <div className="col-span-2 text-right pr-4">Preço Alvo</div>
           <div className="col-span-2 text-right pr-4">Menor Preço</div>
@@ -755,7 +755,7 @@ const App: React.FC = () => {
           <div className="col-span-2 text-right">Ações</div>
         </div>
 
-        {/* Table Body */}
+        {/* Table Body (Cards on Mobile, Grid on Desktop) */}
         <div className="divide-y divide-[#30363d]">
           {sortedItems.length === 0 ? (
             <div className="p-12 text-center text-slate-600 italic">
@@ -771,85 +771,96 @@ const App: React.FC = () => {
               const isActiveEvent = (isDeal || item.hasPriceDrop) && !item.isAck;
 
               // Animação persistente se o evento for ativo
-              let rowClass = "hover:bg-[#1c2128] border-l-transparent bg-[#161b22]";
+              let rowClass = "hover:bg-[#1c2128] border-l-4 border-l-transparent bg-[#161b22]";
               
               if (isDeal) {
-                 // DEAL: Se é oferta (abaixo do preço), a linha é VERDE
                  if (isActiveEvent) {
-                     // Novo (Piscando)
-                     rowClass = "animate-pulse-green border-l-emerald-500 bg-emerald-900/20";
+                     rowClass = "animate-pulse-green border-l-4 border-l-emerald-500 bg-emerald-900/20";
                  } else {
-                     // Visto (Estático)
-                     rowClass = "border-l-emerald-600 bg-emerald-900/10 hover:bg-emerald-900/20";
+                     rowClass = "border-l-4 border-l-emerald-600 bg-emerald-900/10 hover:bg-emerald-900/20";
                  }
               } else if (isActiveEvent && item.hasPriceDrop) {
-                 // DROP: Apenas caiu, mas não é deal (AZUL)
-                 rowClass = "animate-pulse-blue border-l-blue-500 bg-blue-900/20";
+                 rowClass = "animate-pulse-blue border-l-4 border-l-blue-500 bg-blue-900/20";
               }
 
               return (
                 <div 
                   key={item.id} 
-                  className={`grid grid-cols-12 gap-4 px-6 py-4 items-center transition-all duration-500 border-l-4 ${rowClass}`}
+                  className={`flex flex-col md:grid md:grid-cols-12 gap-2 md:gap-4 p-4 md:px-6 md:py-4 transition-all duration-500 relative ${rowClass}`}
                 >
-                  {/* Item Column */}
-                  <div className="col-span-4 flex flex-col justify-center">
-                    <div className="flex items-center gap-2">
-                      <span className={`font-semibold text-sm ${isDeal ? 'text-emerald-400' : (item.hasPriceDrop ? 'text-blue-400' : 'text-white')}`}>
+                  {/* --- Item Details (Mobile: Top / Desktop: Col 1) --- */}
+                  <div className="md:col-span-4 flex flex-col justify-center mb-2 md:mb-0">
+                    <div className="flex justify-between md:justify-start items-center gap-2 w-full">
+                      <span className={`font-semibold text-sm md:text-base ${isDeal ? 'text-emerald-400' : (item.hasPriceDrop ? 'text-blue-400' : 'text-white')}`}>
                         {item.name}
                       </span>
+                      
+                      {/* Mobile Status Indicator */}
+                      <div className="md:hidden flex items-center gap-2">
+                        {isLoading && <span className="text-xs text-blue-400 animate-pulse">Atualizando...</span>}
+                        {hasError && <span className="text-xs text-red-400">Erro</span>}
+                      </div>
                     </div>
-                    {hasError && <div className="text-[10px] text-red-400 mt-1 truncate">{item.message}</div>}
-                    {isLoading && <div className="text-[10px] text-blue-400 mt-1 animate-pulse">Atualizando...</div>}
+                    
+                    {/* Desktop Status Msg */}
+                    <div className="hidden md:block">
+                        {hasError && <div className="text-[10px] text-red-400 mt-1 truncate">{item.message}</div>}
+                        {isLoading && <div className="text-[10px] text-blue-400 mt-1 animate-pulse">Atualizando...</div>}
+                    </div>
                   </div>
 
+                  {/* --- Price Info (Mobile: Middle Row / Desktop: Cols 2 & 3) --- */}
+                  
                   {/* Target Price */}
-                  <div className="col-span-2 font-mono text-slate-500 text-sm text-right pr-4">
-                    {formatMoney(item.targetPrice)}
+                  <div className="md:col-span-2 flex md:block justify-between items-center md:text-right md:pr-4 order-3 md:order-none mt-1 md:mt-0">
+                    <span className="text-xs text-slate-600 font-mono md:hidden">ALVO:</span>
+                    <span className="font-mono text-slate-500 text-sm">{formatMoney(item.targetPrice)}</span>
                   </div>
 
                   {/* Current Price */}
-                  <div className="col-span-2 text-right pr-4">
+                  <div className="md:col-span-2 flex md:flex-col justify-between md:items-end md:justify-center md:text-right md:pr-4 bg-[#0d1117] md:bg-transparent p-2 md:p-0 rounded my-1 md:my-0 order-2 md:order-none">
+                     <span className="text-xs text-slate-500 font-mono md:hidden self-center">ATUAL:</span>
+                     
                      {item.lastPrice !== null ? (
-                       <div className="flex flex-col items-end">
-                         <div className="flex items-center gap-1">
+                       <div className="flex items-center gap-1">
                            {item.hasPriceDrop && <TrendingDown size={14} className="text-blue-500 animate-bounce" />}
                            <span className={`font-mono font-bold text-lg ${isDeal ? 'text-emerald-400' : (item.hasPriceDrop ? 'text-blue-400' : 'text-slate-200')}`}>
                              {formatMoney(item.lastPrice)}
                            </span>
-                         </div>
                        </div>
                      ) : (
                        <span className="text-slate-600 font-mono">--</span>
                      )}
                   </div>
 
-                  {/* Status / Updated */}
-                  <div className="col-span-2 text-xs text-slate-500 flex flex-col justify-center">
-                    <span>{item.lastUpdated ? new Date(item.lastUpdated).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '--:--'}</span>
+                  {/* --- Status / Time (Mobile: Bottom Left / Desktop: Col 4) --- */}
+                  <div className="md:col-span-2 flex flex-row md:flex-col items-center md:items-start justify-between md:justify-center gap-2 text-xs text-slate-500 order-4 md:order-none mt-2 md:mt-0 border-t border-[#30363d] pt-2 md:border-0 md:pt-0">
+                    <div className="flex items-center gap-1">
+                        <Clock size={10} />
+                        <span>{item.lastUpdated ? new Date(item.lastUpdated).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '--:--'}</span>
+                    </div>
                     
-                    {/* Labels de Status */}
-                    {isActiveEvent && isDeal && <span className="text-emerald-500 font-bold uppercase tracking-wider text-[10px]">PREÇO BAIXO!</span>}
-                    {isActiveEvent && !isDeal && item.hasPriceDrop && <span className="text-blue-500 font-bold uppercase tracking-wider text-[10px]">CAIU O PREÇO</span>}
+                    <div className="flex items-center gap-2">
+                        {isActiveEvent && isDeal && <span className="bg-emerald-900/50 text-emerald-400 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase">PREÇO BAIXO!</span>}
+                        {isActiveEvent && !isDeal && item.hasPriceDrop && <span className="bg-blue-900/50 text-blue-400 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase">CAIU</span>}
+                    </div>
                   </div>
 
-                  {/* Actions */}
-                  <div className="col-span-2 flex justify-end gap-2 items-center">
-                    
-                    {/* Check Button for Active Events */}
+                  {/* --- Actions (Mobile: Bottom Right / Desktop: Col 5) --- */}
+                  <div className="md:col-span-2 flex justify-end gap-3 items-center order-5 md:order-none mt-2 md:mt-0 pt-2 md:pt-0 border-t border-[#30363d] md:border-0 border-dashed md:border-solid">
+                    {/* Check Button */}
                     {isActiveEvent && (
                       <button 
                         onClick={() => acknowledgeItem(item.id)}
-                        className={`text-white p-2 rounded-full shadow-lg transition-transform hover:scale-110 mr-2 ${isDeal ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-blue-600 hover:bg-blue-500'}`}
-                        title="Marcar como visto (Parar notificação)"
+                        className={`text-white p-2 rounded-full shadow-lg transition-transform active:scale-95 ${isDeal ? 'bg-emerald-600' : 'bg-blue-600'}`}
                       >
-                        <Eye size={16} />
+                        <Eye size={18} />
                       </button>
                     )}
 
-                    {/* Seen Indicator (Only for Deals) */}
+                    {/* Seen Indicator */}
                     {isDeal && item.isAck && (
-                      <div className="mr-2 text-emerald-700" title="Oferta já vista">
+                      <div className="text-emerald-700">
                         <CheckCircle2 size={18} />
                       </div>
                     )}
@@ -857,16 +868,14 @@ const App: React.FC = () => {
                     <button 
                       onClick={() => handleEditClick(item)}
                       className="text-slate-500 hover:text-blue-400 p-2 hover:bg-blue-500/10 rounded transition"
-                      title="Editar Item"
                     >
-                      <Edit2 size={16} />
+                      <Edit2 size={18} />
                     </button>
                     <button 
                       onClick={() => removeItem(item.id)}
                       className="text-slate-500 hover:text-red-400 p-2 hover:bg-red-500/10 rounded transition"
-                      title="Remover"
                     >
-                      <Trash2 size={16} />
+                      <Trash2 size={18} />
                     </button>
                   </div>
                 </div>
