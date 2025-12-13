@@ -358,8 +358,11 @@ const App: React.FC = () => {
                 status: isSuccess ? (newPrice === 0 ? Status.ALERTA : Status.OK) : Status.ERRO,
                 message: result.error || undefined,
                 nextUpdate: nextTime,
-                isAck: shouldResetAck ? false : i.isAck, // Mantém status de visto se não houver novidade
-                hasPriceDrop: isPriceDrop ? true : (isSuccess ? false : i.hasPriceDrop)
+                isAck: shouldResetAck ? false : i.isAck, 
+                // CORREÇÃO AQUI: Se não houver novo drop (isPriceDrop false), 
+                // mas já existia um drop não visto (i.hasPriceDrop true), mantemos TRUE.
+                // Só sai se o usuário clicar no 'olho' (isAck = true limpa hasPriceDrop via função acknowledgeItem)
+                hasPriceDrop: isPriceDrop ? true : i.hasPriceDrop
               };
             });
 
