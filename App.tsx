@@ -50,6 +50,7 @@ const App: React.FC = () => {
   
   const [settings, setSettings] = useState<Settings>(() => {
     const saved = localStorage.getItem('ro_settings');
+    // Se não tiver salvo, usa o INITIAL_SETTINGS (que agora tem seu cookie)
     return saved ? JSON.parse(saved) : INITIAL_SETTINGS;
   });
 
