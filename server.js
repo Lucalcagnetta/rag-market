@@ -111,24 +111,18 @@ app.get('/api/search', async (req, res) => {
   console.log(`[SCRAPER] Buscando: ${item}`);
 
   try {
-    // Headers Reforçados para evitar 403/502 (Mantido da versão funcional)
+    // Headers idênticos ao GAS (exceto Cookie que vem dinâmico)
     const headers = {
       'Cookie': userCookie,
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-      'Referer': 'https://ro.gnjoylatam.com/',
-      'Origin': 'https://ro.gnjoylatam.com',
-      'Connection': 'keep-alive',
-      'Upgrade-Insecure-Requests': '1',
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'same-origin',
-      'Sec-Fetch-User': '?1'
+      'Cache-Control': 'no-cache',
+      'Upgrade-Insecure-Requests': '1'
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000); 
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
     const response = await fetch(targetUrl, { 
       method: 'GET', 
@@ -143,74 +137,72 @@ app.get('/api/search', async (req, res) => {
     // 1. Verificações de Status HTTP
     if (status === 403 || status === 401) {
         console.error(`[ERRO] Acesso negado: ${status}`);
-        return res.json({ success: false, price: null, error: `Acesso negado (Verifique o Cookie)` });
-    }
-
-    if (status === 502 || status === 500) {
-        return res.json({ success: false, price: null, error: `Erro Servidor RO (${status})` });
+        return res.json({ success: false, price: null, error: `Acesso negado (cookie?)` });
     }
 
     if (!response.ok) {
         return res.json({ success: false, price: null, error: `Erro HTTP: ${status}` });
     }
 
-    const htmlTextRaw = await response.text();
-    console.log(`📡 HTTP ${status} - ${htmlTextRaw.length} chars`);
+    const htmlText = await response.text();
+    console.log(`📡 HTTP ${status} - ${htmlText.length} chars`);
     
-    // LIMPEZA BÁSICA
-    const htmlText = htmlTextRaw.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ');
-
     // 2. Verificações de Conteúdo (Login/Bloqueio)
     if (htmlText.includes('member/login') || htmlText.includes('signin-form') || htmlText.includes('name="password"')) {
-        return res.json({ success: false, price: null, error: 'Login Expirado' });
+        return res.json({ success: false, price: null, error: 'Precisa fazer login' });
     }
 
     if (htmlText.includes('Access Denied') || htmlText.includes('access denied')) {
-        return res.json({ success: false, price: null, error: 'IP Bloqueado' });
+        return res.json({ success: false, price: null, error: 'Acesso bloqueado' });
     }
 
     // =======================================================
-    // BUSCA DE PREÇO - RETORNO À LÓGICA CLÁSSICA
+    // BUSCA DE PREÇO (LÓGICA EXATA DO GAS)
     // =======================================================
-    
-    let pricesFound = [];
 
-    // Regex Original Robusta: Procura número + 'z'
-    // Ex: 1.000 z | 1.000z | 1.000 <span...>z
-    // Essa regex garante que é um valor monetário e evita números aleatórios do site
-    const priceRegex = /([0-9]{1,3}(?:[.,][0-9]{3})*)\s*(?:<[^>]+>\s*)*z/gi;
-    
-    const matches = [...htmlText.matchAll(priceRegex)];
-    for (const m of matches) {
-       pricesFound.push(parsePriceString(m[1]));
+    // MÉTODO 1: Regex específico para formato "100.000 z" entre tags
+    // Regex: />\s*([0-9]{1,3}(?:[.,\s]?[0-9]{3})*)\s*z\s*</i
+    const method1Regex = />\s*([0-9]{1,3}(?:[.,\s]?[0-9]{3})*)\s*z\s*</i;
+    const match1 = htmlText.match(method1Regex);
+
+    if (match1) {
+        const val = parsePriceString(match1[1]);
+        if (val > 100 && val < 1000000000) {
+             console.log(`[SUCESSO M1] ${item}: ${val}`);
+             return res.json({ success: true, price: val });
+        }
     }
 
-    // FILTRAGEM DE PREÇOS
-    const validPrices = pricesFound
-      .filter(val => {
-         if (isNaN(val)) return false;
-         if (val < 100) return false; // Ignora quantidades pequenas
-         
-         // FILTRO CRÍTICO: Ignora o saldo do cabeçalho
-         // Se o usuário tem 20kk ou se é um placeholder do site, removemos.
-         if (val === 20000000) return false; 
+    // MÉTODO 2: Procura em toda a página (Fallback)
+    // Regex: />\s*([0-9,\.\s]+)\s*(?:z|Zeny)?\s*</gi
+    const method2Regex = />\s*([0-9,\.\s]+)\s*(?:z|Zeny)?\s*</gi;
+    const matches2 = [...htmlText.matchAll(method2Regex)];
+    
+    let minPrice = Infinity;
+    let found = false;
 
-         if (val > 3000000000) return false; // > 3bi = erro
-         
-         // Filtra anos
-         if (val >= 2023 && val <= 2026) return false;
-         
-         return true;
-      })
-      .sort((a, b) => a - b); // Ordena do menor para o maior
-
-    if (validPrices.length > 0) {
-        const bestPrice = validPrices[0];
-        console.log(`[SUCESSO] ${item}: ${bestPrice} z`);
-        return res.json({ success: true, price: bestPrice });
+    for (const m of matches2) {
+        // m[1] contém o grupo de captura com o número
+        const val = parsePriceString(m[1]);
+        
+        // Filtros válidos
+        if (!isNaN(val) && val > 100 && val < 1000000000) {
+            // Ignora anos (regras do GAS)
+            if (val !== 2024 && val !== 2025) {
+                if (val < minPrice) {
+                    minPrice = val;
+                    found = true;
+                }
+            }
+        }
     }
 
-    // 3. Verifica "Sem resultados"
+    if (found && minPrice !== Infinity) {
+        console.log(`[SUCESSO M2] ${item}: ${minPrice}`);
+        return res.json({ success: true, price: minPrice });
+    }
+
+    // 3. Verifica se não há resultados
     if (
       htmlText.includes('não foram encontrados') || 
       htmlText.includes('No results') || 
@@ -222,12 +214,11 @@ app.get('/api/search', async (req, res) => {
         return res.json({ success: true, price: 0, error: 'Sem ofertas' });
     }
     
-    console.log(`[FALHA] Preço não encontrado no HTML para: ${item}`);
-    return res.json({ success: false, price: null, error: 'Formato desconhecido' });
+    return res.json({ success: false, price: null, error: 'Preço não encontrado' });
 
   } catch (error) {
     console.error(`[ERRO CRÍTICO] ${item}:`, error.message);
-    return res.json({ success: false, price: null, error: error.message });
+    return res.json({ success: false, price: null, error: error.toString() });
   }
 });
 
