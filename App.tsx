@@ -224,7 +224,6 @@ const App: React.FC = () => {
 
       // 3. Itens Normais (Sem novidade, preço igual ou subiu)
       // Ordena por Nome para manter a lista estável e não pular itens inúteis pro topo
-      // "e não o ultimo item que foi feita uma busca"
       return a.name.localeCompare(b.name);
     });
   }, []);
@@ -355,18 +354,35 @@ const App: React.FC = () => {
     setSettings(tempSettings);
   };
 
-  // Helper para converter "1kk" -> 1000000
+  // Helper Inteligente:
+  // "30" -> 30kk
+  // "350" -> 350kk
+  // "1500" -> 1.500 (Valor literal, pois >= 1000)
+  // "1k" -> 1.000
+  // "30z" -> 30 (Força valor baixo)
   const parseKkInput = (val: string): number => {
     if (!val) return 0;
     let numStr = val.toLowerCase().replace(/\s/g, '').replace(',', '.');
     let multiplier = 1;
     
+    // Check suffixes
     if (numStr.includes('kk')) {
       multiplier = 1000000;
       numStr = numStr.replace('kk', '');
     } else if (numStr.includes('k')) {
       multiplier = 1000;
       numStr = numStr.replace('k', '');
+    } else if (numStr.includes('z')) {
+      // Sufixo 'z' força o valor literal (ex: 500z = 500)
+      multiplier = 1;
+      numStr = numStr.replace('z', '');
+    } else {
+      // SEM SUFIXO: Heurística Automática
+      const tempNum = parseFloat(numStr);
+      if (!isNaN(tempNum) && tempNum < 1000 && tempNum > 0) {
+        // Se for menor que 1000, assume Milhões (kk)
+        multiplier = 1000000;
+      }
     }
     
     const num = parseFloat(numStr);
@@ -493,7 +509,7 @@ const App: React.FC = () => {
                      const val = parseKkInput(e.target.value);
                      setEditingItem({...editingItem, targetPrice: val});
                   }}
-                  placeholder="Ex: 350kk"
+                  placeholder="Ex: 30 (entende 30kk)"
                   className="w-full bg-[#0d1117] border border-[#30363d] rounded px-3 py-2 text-white focus:border-blue-500 outline-none"
                 />
                 <span className="text-[10px] text-slate-500">Valor real: {editingItem.targetPrice.toLocaleString()} z</span>
@@ -628,7 +644,7 @@ const App: React.FC = () => {
               type="text" 
               value={newItemTarget}
               onChange={(e) => setNewItemTarget(e.target.value)}
-              placeholder="Ex: 350kk"
+              placeholder="Ex: 30 (entende 30kk)"
               className="w-full bg-[#161b22] border border-[#30363d] rounded px-3 py-2 text-sm focus:border-blue-500 outline-none text-white placeholder-slate-600"
               onKeyDown={(e) => e.key === 'Enter' && addNewItem()}
             />
