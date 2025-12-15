@@ -6,6 +6,7 @@ export const INITIAL_SETTINGS: Settings = {
   useProxy: false,
   proxyUrl: 'https://api.allorigins.win/raw?url=',
   isRunning: true,
+  ignoreNightPause: false,
 };
 
 export const MOCK_ITEMS: Item[] = [

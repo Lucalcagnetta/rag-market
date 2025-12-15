@@ -29,13 +29,19 @@ if (!fs.existsSync(DB_FILE)) {
       cookie: '', 
       useProxy: false, 
       proxyUrl: '', 
-      isRunning: true 
+      isRunning: true,
+      ignoreNightPause: false
     } 
   }));
 }
 
 // --- STATE MANAGEMENT (IN-MEMORY with FLUSH) ---
 let GLOBAL_DB = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+
+// Garante que ignoreNightPause existe se vier de um DB antigo
+if (typeof GLOBAL_DB.settings.ignoreNightPause === 'undefined') {
+  GLOBAL_DB.settings.ignoreNightPause = false;
+}
 
 // Função para persistir no disco
 const saveDB = () => {
@@ -378,7 +384,9 @@ const startAutomationLoop = () => {
     
     // FIX: Usa hora do Brasil, não do servidor (UTC)
     const h = getBrazilHour();
-    if (h >= 1 && h < 8) return;
+    
+    // Só pausa se ignoreNightPause for falso
+    if (!GLOBAL_DB.settings.ignoreNightPause && h >= 1 && h < 8) return;
 
     const now = Date.now();
     const candidates = GLOBAL_DB.items.filter(i => i.nextUpdate <= now && i.status !== 'LOADING');
@@ -393,7 +401,8 @@ const startAutomationLoop = () => {
       
       // FIX: Usa hora do Brasil, não do servidor (UTC)
       const h = getBrazilHour();
-      if (h >= 1 && h < 8) return;
+      // Só pausa se ignoreNightPause for falso
+      if (!GLOBAL_DB.settings.ignoreNightPause && h >= 1 && h < 8) return;
 
       const now = Date.now();
       const candidates = GLOBAL_DB.items.filter(i => i.nextUpdate <= now && i.status !== 'LOADING');

@@ -25,6 +25,7 @@ export interface Settings {
   useProxy: boolean;
   proxyUrl: string;
   isRunning: boolean; // Controle Global da Automação
+  ignoreNightPause?: boolean; // Se true, roda 24h ignorando o horário 01-08h
 }
 
 export interface ScrapeResult {

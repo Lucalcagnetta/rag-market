@@ -500,9 +500,9 @@ const App: React.FC = () => {
       {/* HEADER */}
       <header className="max-w-6xl mx-auto mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
-           <h1 className="text-xl font-bold text-white flex items-center gap-2"><Activity className="text-blue-500"/> Ragnarok Cloud Tracker</h1>
+           {/* Logo removida conforme pedido */}
            <div className="flex gap-2 mt-1">
-             <span className="text-[10px] bg-slate-800 px-2 rounded border border-slate-700">Server-Side Auto</span>
+             {/* Badge Server-Side Auto removida */}
              <span className="text-[10px] bg-slate-800 px-2 rounded border border-slate-700 text-slate-400">
                {items.length} {items.length === 1 ? 'Item' : 'Itens'}
              </span>
@@ -593,7 +593,7 @@ const App: React.FC = () => {
       </header>
       
       {/* STATUS BAR */}
-      {settings.isRunning && isNightPause && (
+      {settings.isRunning && isNightPause && !settings.ignoreNightPause && (
         <div className="max-w-6xl mx-auto mb-4 bg-yellow-900/20 border border-yellow-700/50 text-yellow-500 p-2 rounded text-center text-xs flex items-center justify-center gap-2">
            <Moon size={14} /> Pausa Noturna Automática (Servidor: 01h-08h)
         </div>
@@ -604,6 +604,18 @@ const App: React.FC = () => {
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
            <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-lg w-full max-w-lg">
               <h3 className="font-bold mb-4">Configurações do Servidor</h3>
+              
+              <div className="flex items-center gap-2 mb-4">
+                 <input 
+                   type="checkbox" 
+                   id="ignoreNight"
+                   checked={!!tempSettings.ignoreNightPause}
+                   onChange={e => setTempSettings({...tempSettings, ignoreNightPause: e.target.checked})}
+                   className="rounded bg-slate-900 border-slate-700"
+                 />
+                 <label htmlFor="ignoreNight" className="text-sm text-slate-300">Ignorar Pausa Noturna (Rodar 24h)</label>
+              </div>
+
               <textarea 
                 className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm font-mono text-slate-300 h-24 mb-4"
                 placeholder="Cole o Cookie aqui..."
