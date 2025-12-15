@@ -538,12 +538,12 @@ const App: React.FC = () => {
              <div className="flex items-center gap-2">
                <div className="bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50 flex items-center gap-2 shadow-sm">
                  <div className={`w-2 h-2 rounded-full ${settings.isRunning ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-rose-500'}`}></div>
-                 <span className="text-xs font-medium text-slate-300 tracking-wide">
+                 <span className="hidden md:inline text-xs font-medium text-slate-300 tracking-wide">
                    {items.length} <span className="text-slate-500">monitors</span>
                  </span>
                </div>
                {saveStatus === 'saving' && (
-                 <span className="text-[10px] text-blue-400 animate-pulse font-mono bg-blue-500/10 px-2 py-1 rounded">SYNC...</span>
+                 <span className="text-[10px] text-blue-400 font-mono bg-blue-500/10 px-2 py-1 rounded">SYNC...</span>
                )}
              </div>
           </div>
@@ -595,7 +595,7 @@ const App: React.FC = () => {
              {activeAlertsCount > 0 && (
                <button 
                  onClick={acknowledgeAll} 
-                 className="mr-auto md:mr-2 bg-blue-600/90 hover:bg-blue-500 text-white px-3 h-[36px] rounded-lg text-xs font-medium flex items-center gap-2 shadow-lg shadow-blue-900/20 transition-all hover:scale-105 active:scale-95 animate-pulse"
+                 className="mr-auto md:mr-2 bg-blue-600/90 hover:bg-blue-500 text-white px-3 h-[36px] rounded-lg text-xs font-medium flex items-center gap-2 shadow-lg shadow-blue-900/20 transition-all hover:scale-105 active:scale-95"
                >
                   <ListChecks size={14} /> 
                   <span className="hidden sm:inline">Marcar Visto</span>
@@ -643,7 +643,7 @@ const App: React.FC = () => {
                }`}
              >
                {settings.isRunning ? (
-                 <><div className="w-2 h-2 bg-white rounded-full animate-ping mr-1"></div> ONLINE</>
+                 <><div className="w-2 h-2 bg-white rounded-full mr-1"></div> ONLINE</>
                ) : (
                  <><Pause size={14} className="opacity-50"/> PAUSADO</>
                )}
