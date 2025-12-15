@@ -17,7 +17,9 @@ import {
   Moon,
   Volume2,
   VolumeX,
-  Calculator
+  ChevronDown,
+  ChevronUp,
+  X
 } from 'lucide-react';
 
 const SYNC_INTERVAL_MS = 2000; // Sincroniza com servidor a cada 2s
@@ -40,6 +42,9 @@ const App: React.FC = () => {
   const [calcPrice, setCalcPrice] = useState(() => localStorage.getItem('ro_calc_price') || '');
   const [calcQty, setCalcQty] = useState('');
   const [calcTotal, setCalcTotal] = useState('');
+
+  // -- Add Item UI State --
+  const [isAddExpanded, setIsAddExpanded] = useState(false);
 
   // Salva o preço no localStorage sempre que ele mudar
   useEffect(() => {
@@ -380,6 +385,7 @@ const App: React.FC = () => {
     saveData(newList, settings);
     setNewItemName('');
     setNewItemTarget('');
+    setIsAddExpanded(false); // Fecha o menu no mobile após adicionar
   };
 
   const removeItem = (id: string) => {
@@ -410,6 +416,8 @@ const App: React.FC = () => {
   };
 
   const acknowledgeAll = async () => {
+    if (activeAlertsCount === 0) return;
+    
     if (confirm("Marcar tudo como visto?")) {
       // Adiciona todos aos pendentes
       items.forEach(i => pendingAcksRef.current.add(i.id));
@@ -552,17 +560,22 @@ const App: React.FC = () => {
                  <span className="text-[10px] text-blue-400 font-mono bg-blue-500/10 px-2 py-1 rounded animate-pulse">SYNC</span>
              )}
 
-             {/* MARCAR VISTO - Agora aqui na Esquerda para não empurrar os botões da direita */}
-             {activeAlertsCount > 0 && (
-               <button 
-                 onClick={acknowledgeAll} 
-                 className="bg-blue-600 hover:bg-blue-500 text-white px-3 h-[36px] rounded-lg text-xs font-medium flex items-center gap-2 shadow-lg shadow-blue-900/20 transition-all active:scale-95"
-               >
-                  <ListChecks size={16} /> 
-                  <span className="hidden sm:inline">Marcar Visto</span>
-                  <span className="bg-white/20 px-1.5 rounded text-[10px] font-bold">{activeAlertsCount}</span>
-               </button>
-             )}
+             {/* MARCAR VISTO - Sempre visível, cinza se 0 */}
+             <button 
+               onClick={acknowledgeAll} 
+               disabled={activeAlertsCount === 0}
+               className={`px-3 h-[36px] rounded-lg text-xs font-medium flex items-center gap-2 shadow-lg transition-all active:scale-95 ${
+                 activeAlertsCount > 0 
+                    ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/20' 
+                    : 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700'
+               }`}
+             >
+                <ListChecks size={16} /> 
+                <span className="hidden sm:inline">Marcar Visto</span>
+                <span className={`${activeAlertsCount > 0 ? 'bg-white/20 text-white' : 'bg-slate-700 text-slate-500'} px-1.5 rounded text-[10px] font-bold`}>
+                    {activeAlertsCount}
+                </span>
+             </button>
           </div>
           
           {/* CENTER: CALCULATOR (Desktop Only) */}
@@ -706,11 +719,39 @@ const App: React.FC = () => {
 
         {/* MAIN LIST */}
         <div className="bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden shadow-2xl">
-           {/* ADD BAR */}
-           <div className="p-4 bg-[#0d1117] border-b border-[#30363d] flex flex-col md:flex-row gap-2">
-              <input className="flex-1 bg-[#161b22] border border-[#30363d] p-2 rounded text-sm text-white" placeholder="Nome do Item..." value={newItemName} onChange={e => setNewItemName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addNewItem()}/>
-              <input className="w-full md:w-32 bg-[#161b22] border border-[#30363d] p-2 rounded text-sm text-white" placeholder="Preço (30kk)" value={newItemTarget} onChange={e => setNewItemTarget(e.target.value)} onKeyDown={e => e.key === 'Enter' && addNewItem()}/>
-              <button onClick={addNewItem} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold flex items-center justify-center gap-1"><Plus size={16}/> ADD</button>
+           
+           {/* ADD BAR (COLLAPSIBLE ON MOBILE) */}
+           <div className="p-4 bg-[#0d1117] border-b border-[#30363d]">
+               {/* Mobile Toggle Button */}
+               <div className="md:hidden">
+                   {!isAddExpanded ? (
+                       <button 
+                         onClick={() => setIsAddExpanded(true)}
+                         className="w-full bg-slate-800 hover:bg-slate-700 text-blue-400 py-3 rounded-lg border border-slate-700/50 flex items-center justify-center gap-2 font-medium transition-colors"
+                       >
+                           <Plus size={18} /> Novo Item
+                       </button>
+                   ) : (
+                       <button 
+                         onClick={() => setIsAddExpanded(false)}
+                         className="w-full mb-3 text-slate-500 text-xs flex items-center justify-center gap-1 hover:text-slate-300"
+                       >
+                           <ChevronUp size={14} /> Recolher
+                       </button>
+                   )}
+               </div>
+
+               {/* Inputs Container - Hidden on Mobile unless expanded, always Block on Desktop */}
+               <div className={`${isAddExpanded ? 'flex' : 'hidden'} md:flex flex-col md:flex-row gap-2`}>
+                  <input className="flex-1 bg-[#161b22] border border-[#30363d] p-2 rounded text-sm text-white focus:border-blue-500 focus:outline-none transition-colors" placeholder="Nome do Item..." value={newItemName} onChange={e => setNewItemName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addNewItem()}/>
+                  <input className="w-full md:w-32 bg-[#161b22] border border-[#30363d] p-2 rounded text-sm text-white focus:border-blue-500 focus:outline-none transition-colors" placeholder="Preço (30kk)" value={newItemTarget} onChange={e => setNewItemTarget(e.target.value)} onKeyDown={e => e.key === 'Enter' && addNewItem()}/>
+                  <div className="flex gap-2">
+                     <button onClick={addNewItem} className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold flex items-center justify-center gap-1 shadow-lg shadow-blue-900/20"><Plus size={16}/> ADD</button>
+                     {isAddExpanded && (
+                       <button onClick={() => setIsAddExpanded(false)} className="md:hidden bg-slate-800 text-slate-400 px-3 rounded hover:bg-slate-700"><X size={18}/></button>
+                     )}
+                  </div>
+               </div>
            </div>
 
            {/* ITEMS */}
@@ -735,6 +776,20 @@ const App: React.FC = () => {
                       </div>
                       
                       <div className="flex items-center w-full md:w-auto justify-between md:justify-end">
+                          
+                          {/* BOTÃO "OLHO" - Agora na esquerda do Alvo */}
+                          <div className="w-8 flex justify-center mr-2">
+                             {isActiveEvent && (
+                               <button 
+                                 onClick={() => acknowledgeItem(item.id)} 
+                                 className="text-emerald-500 hover:text-emerald-300 hover:bg-emerald-500/20 p-2 rounded-full transition-all"
+                                 title="Marcar como visto"
+                               >
+                                  <Eye size={20}/>
+                               </button>
+                             )}
+                          </div>
+
                           <div className="text-right w-24">
                              <div className="text-[10px] text-slate-500 font-bold tracking-wider">ALVO</div>
                              <div className="font-mono text-slate-400">{formatMoney(item.targetPrice)}</div>
@@ -752,9 +807,6 @@ const App: React.FC = () => {
                       </div>
 
                       <div className="flex gap-2 w-full md:w-auto justify-center border-t border-slate-800 pt-2 md:pt-0 md:border-0 md:ml-4">
-                         {isActiveEvent && (
-                           <button onClick={() => acknowledgeItem(item.id)} className="bg-emerald-600 text-white p-2 rounded-full shadow-lg"><Eye size={16}/></button>
-                         )}
                          <button title="Forçar Atualização" onClick={() => resetItem(item.id)} className="text-slate-500 hover:text-emerald-400 p-2"><RefreshCw size={16}/></button>
                          <button onClick={() => { setEditingItem(item); setEditingTargetInput(formatMoney(item.targetPrice).replace('z','').trim()); }} className="text-slate-500 hover:text-blue-400 p-2"><Edit2 size={16}/></button>
                          <button onClick={() => removeItem(item.id)} className="text-slate-500 hover:text-red-400 p-2"><Trash2 size={16}/></button>
