@@ -275,12 +275,14 @@ const App: React.FC = () => {
     
     items.forEach(newItem => {
         const oldItem = prevItems.find(p => p.id === newItem.id);
+        const isPendingAck = pendingAcksRef.current.has(newItem.id);
         
         // Só toca som se:
         // 1. O item NÃO está visto (é um alerta ativo)
-        // 2. E (Ele era novo na lista OU ele JÁ estava visto antes OU ele mudou de timestamp)
+        // 2. O item NÃO está pendente de confirmação de leitura (evita som ao clicar em "Visto")
+        // 3. E (Ele era novo na lista OU ele JÁ estava visto antes OU ele mudou de timestamp)
         // A lógica do pendingAcksRef acima garante que o newItem.isAck não reverta para false acidentalmente.
-        if (!newItem.isAck && (oldItem?.isAck !== false)) {
+        if (!newItem.isAck && !isPendingAck && (oldItem?.isAck !== false)) {
             const isDeal = newItem.lastPrice && newItem.lastPrice <= newItem.targetPrice;
             if (isDeal) {
                 playSound('deal');
@@ -766,7 +768,7 @@ const App: React.FC = () => {
 
                  return (
                    <div key={item.id} className={`p-4 flex flex-col md:flex-row items-center gap-4 ${bgClass}`}>
-                      <div className="flex-1 text-center md:text-left w-full">
+                      <div className="w-full md:w-1/3 text-center md:text-left mb-2 md:mb-0">
                          <div className="font-bold text-white">{item.name}</div>
                          <div className="flex items-center justify-center md:justify-start gap-2 mt-1">
                             {item.status === 'LOADING' && <span className="text-[10px] text-blue-400 animate-pulse">Verificando...</span>}
@@ -775,10 +777,10 @@ const App: React.FC = () => {
                          </div>
                       </div>
                       
-                      <div className="flex items-center w-full md:w-auto justify-between md:justify-end">
+                      <div className="flex flex-1 items-center justify-between md:justify-center gap-4 w-full md:w-auto">
                           
-                          {/* BOTÃO "OLHO" - Agora na esquerda do Alvo */}
-                          <div className="w-8 flex justify-center mr-2">
+                          {/* BOTÃO "OLHO" */}
+                          <div className="w-8 flex justify-center">
                              {isActiveEvent && (
                                <button 
                                  onClick={() => acknowledgeItem(item.id)} 
@@ -790,15 +792,15 @@ const App: React.FC = () => {
                              )}
                           </div>
 
-                          <div className="text-right w-24">
+                          <div className="text-center w-24">
                              <div className="text-[10px] text-slate-500 font-bold tracking-wider">ALVO</div>
                              <div className="font-mono text-slate-400">{formatMoney(item.targetPrice)}</div>
                           </div>
                           
                           {/* SEPARADOR VERTICAL */}
-                          <div className="h-8 w-px bg-slate-700 mx-4"></div>
+                          <div className="h-8 w-px bg-slate-700"></div>
 
-                          <div className="text-right w-28">
+                          <div className="text-center w-28">
                              <div className="text-[10px] text-slate-500 font-bold tracking-wider">ATUAL</div>
                              <div className={`font-mono text-lg font-bold ${isDeal ? 'text-emerald-400' : 'text-slate-200'}`}>
                                {formatMoney(item.lastPrice)}
