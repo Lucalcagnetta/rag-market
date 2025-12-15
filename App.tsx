@@ -529,98 +529,126 @@ const App: React.FC = () => {
         }
       `}</style>
 
-      {/* HEADER */}
-      <header className="max-w-6xl mx-auto mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
-        <div>
-           {/* Logo removida conforme pedido */}
-           <div className="flex gap-2 mt-1">
-             {/* Badge Server-Side Auto removida */}
-             <span className="text-[10px] bg-slate-800 px-2 rounded border border-slate-700 text-slate-400">
-               {items.length} {items.length === 1 ? 'Item' : 'Itens'}
-             </span>
-             {saveStatus === 'saving' && <span className="text-[10px] text-blue-400">Sincronizando...</span>}
-           </div>
-        </div>
-        
-        {/* CALCULADORA (PC ONLY) */}
-        <div className="hidden md:flex items-center gap-2 bg-slate-800/50 border border-slate-700 p-2 rounded-lg">
-           <div className="flex flex-col">
-              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Preço KK</span>
-              <div className="flex items-center bg-slate-900 border border-slate-700 rounded px-2 py-1 w-24">
-                 <span className="text-xs text-slate-500 mr-1">R$</span>
-                 <input 
-                   className="w-full bg-transparent text-xs font-mono text-white focus:outline-none"
-                   placeholder="0,00"
-                   value={calcPrice}
-                   onChange={e => handleCalcPriceChange(e.target.value)}
-                 />
-              </div>
-           </div>
-           <span className="text-slate-500 mt-4">×</span>
-           <div className="flex flex-col">
-              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Qtd</span>
-              <div className="flex items-center bg-slate-900 border border-slate-700 rounded px-2 py-1 w-20">
-                 <input 
-                   className="w-full bg-transparent text-xs font-mono text-white focus:outline-none text-center"
-                   placeholder="0"
-                   value={calcQty}
-                   onChange={e => handleCalcQtyChange(e.target.value)}
-                 />
-              </div>
-           </div>
-           <span className="text-slate-500 mt-4">=</span>
-           <div className="flex flex-col">
-              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1">Total Reais</span>
-              <div className="flex items-center bg-slate-900 border border-slate-700 rounded px-2 py-1 w-24">
-                 <span className="text-xs text-slate-500 mr-1">R$</span>
-                 <input 
-                   className="w-full bg-transparent text-xs font-mono text-white focus:outline-none"
-                   placeholder="0,00"
-                   value={calcTotal}
-                   onChange={e => handleCalcTotalChange(e.target.value)}
-                 />
-              </div>
-           </div>
-        </div>
+      {/* HEADER STICKY GLASS */}
+      <header className="sticky top-0 z-30 bg-[#0d1117]/80 backdrop-blur-md border-b border-slate-800/60 mb-6 py-3 px-2 -mx-2 md:-mx-8 md:px-8 shadow-xl transition-all">
+        <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+          
+          {/* LEFT: INFO & STATUS */}
+          <div className="flex items-center justify-between w-full md:w-auto gap-4">
+             <div className="flex items-center gap-2">
+               <div className="bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50 flex items-center gap-2 shadow-sm">
+                 <div className={`w-2 h-2 rounded-full ${settings.isRunning ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-rose-500'}`}></div>
+                 <span className="text-xs font-medium text-slate-300 tracking-wide">
+                   {items.length} <span className="text-slate-500">monitors</span>
+                 </span>
+               </div>
+               {saveStatus === 'saving' && (
+                 <span className="text-[10px] text-blue-400 animate-pulse font-mono bg-blue-500/10 px-2 py-1 rounded">SYNC...</span>
+               )}
+             </div>
+          </div>
+          
+          {/* CENTER: CALCULATOR (Desktop Only) */}
+          <div className="hidden md:flex items-center gap-1 bg-slate-900/50 border border-slate-800 p-1.5 rounded-lg shadow-inner">
+             <div className="flex flex-col px-1">
+                <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider text-center">Preço (KK)</span>
+                <div className="flex items-center bg-slate-950/50 rounded px-2 py-0.5 w-24 border border-slate-800 focus-within:border-slate-600 transition-colors">
+                   <span className="text-[10px] text-emerald-600 mr-1">$</span>
+                   <input 
+                     className="w-full bg-transparent text-xs font-mono text-emerald-100 focus:outline-none placeholder-slate-700"
+                     placeholder="0,00"
+                     value={calcPrice}
+                     onChange={e => handleCalcPriceChange(e.target.value)}
+                   />
+                </div>
+             </div>
+             <span className="text-slate-600 pb-3">×</span>
+             <div className="flex flex-col px-1">
+                <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider text-center">Qtd</span>
+                <div className="flex items-center bg-slate-950/50 rounded px-2 py-0.5 w-20 border border-slate-800 focus-within:border-slate-600 transition-colors">
+                   <input 
+                     className="w-full bg-transparent text-xs font-mono text-blue-100 focus:outline-none text-center placeholder-slate-700"
+                     placeholder="1"
+                     value={calcQty}
+                     onChange={e => handleCalcQtyChange(e.target.value)}
+                   />
+                </div>
+             </div>
+             <span className="text-slate-600 pb-3">=</span>
+             <div className="flex flex-col px-1">
+                <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider text-center">Total (R$)</span>
+                <div className="flex items-center bg-slate-950/50 rounded px-2 py-0.5 w-24 border border-slate-800 focus-within:border-slate-600 transition-colors">
+                   <span className="text-[10px] text-amber-600 mr-1">R$</span>
+                   <input 
+                     className="w-full bg-transparent text-xs font-mono text-amber-100 focus:outline-none placeholder-slate-700"
+                     placeholder="0,00"
+                     value={calcTotal}
+                     onChange={e => handleCalcTotalChange(e.target.value)}
+                   />
+                </div>
+             </div>
+          </div>
 
-        <div className="flex gap-2 items-center">
-           {activeAlertsCount > 0 && (
-             <button onClick={acknowledgeAll} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs flex items-center gap-1 animate-pulse mr-2">
-                <ListChecks size={14} /> Visto ({activeAlertsCount})
+          {/* RIGHT: ACTION BUTTONS */}
+          <div className="flex items-center gap-2 w-full md:w-auto justify-end bg-slate-900/30 md:bg-transparent p-1.5 md:p-0 rounded-xl border border-white/5 md:border-0">
+             
+             {activeAlertsCount > 0 && (
+               <button 
+                 onClick={acknowledgeAll} 
+                 className="mr-auto md:mr-2 bg-blue-600/90 hover:bg-blue-500 text-white px-3 h-[36px] rounded-lg text-xs font-medium flex items-center gap-2 shadow-lg shadow-blue-900/20 transition-all hover:scale-105 active:scale-95 animate-pulse"
+               >
+                  <ListChecks size={14} /> 
+                  <span className="hidden sm:inline">Marcar Visto</span>
+                  <span className="bg-white/20 px-1.5 rounded text-[10px]">{activeAlertsCount}</span>
+               </button>
+             )}
+
+             {/* VOLUME */}
+             <div className="relative group flex items-center bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-lg h-[36px] px-2 transition-all cursor-pointer">
+                <button 
+                  onClick={() => handleVolumeChange(volume === 0 ? 0.5 : 0)} 
+                  className={`transition-colors ${volume === 0 ? 'text-slate-500' : 'text-blue-400'}`}
+                  title="Volume"
+                >
+                   {volume === 0 ? <VolumeX size={16}/> : <Volume2 size={16}/>}
+                </button>
+                <div className="w-0 overflow-hidden group-hover:w-20 transition-all duration-300 flex items-center ml-0 group-hover:ml-2">
+                   <input 
+                     type="range" 
+                     min="0" 
+                     max="1" 
+                     step="0.05" 
+                     value={volume} 
+                     onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                     className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer"
+                   />
+                </div>
+             </div>
+
+             {/* SETTINGS */}
+             <button 
+               onClick={() => setShowSettings(!showSettings)} 
+               className="bg-slate-800 hover:bg-slate-700 border border-slate-700 h-[36px] w-[36px] flex items-center justify-center rounded-lg transition-all text-slate-400 hover:text-white"
+             >
+                <SettingsIcon size={16} />
              </button>
-           )}
-
-           {/* VOLUME CONTROL */}
-           <div className="relative group flex items-center bg-slate-800 border border-slate-700 rounded h-[38px] px-2 mr-2">
-              <button 
-                onClick={() => handleVolumeChange(volume === 0 ? 0.5 : 0)} 
-                className="text-slate-400 hover:text-white"
-                title="Volume do Alerta"
-              >
-                 {volume === 0 ? <VolumeX size={16}/> : <Volume2 size={16}/>}
-              </button>
-              <div className="w-0 overflow-hidden group-hover:w-24 transition-all duration-300 flex items-center ml-1">
-                 <input 
-                   type="range" 
-                   min="0" 
-                   max="1" 
-                   step="0.05" 
-                   value={volume} 
-                   onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-                   className="w-20 cursor-pointer"
-                 />
-              </div>
-           </div>
-
-           <button onClick={() => setShowSettings(!showSettings)} className="bg-slate-800 border border-slate-700 p-2 rounded hover:bg-slate-700 transition h-[38px]">
-              <SettingsIcon size={16} />
-           </button>
-           <button 
-             onClick={toggleAutomation}
-             className={`px-4 h-[38px] rounded font-bold flex items-center gap-2 text-xs transition ${settings.isRunning ? 'bg-emerald-600 text-white' : 'bg-red-900/30 text-red-400 border border-red-800'}`}
-           >
-             {settings.isRunning ? <><Pause size={14}/> ONLINE</> : <><Play size={14}/> PAUSADO</>}
-           </button>
+             
+             {/* PLAY/PAUSE */}
+             <button 
+               onClick={toggleAutomation}
+               className={`h-[36px] px-4 rounded-lg font-bold text-xs flex items-center gap-2 transition-all shadow-lg border ${
+                 settings.isRunning 
+                   ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-500/50 text-white shadow-emerald-900/20' 
+                   : 'bg-slate-800 hover:bg-slate-700 border-rose-900/30 text-rose-400 shadow-rose-900/10'
+               }`}
+             >
+               {settings.isRunning ? (
+                 <><div className="w-2 h-2 bg-white rounded-full animate-ping mr-1"></div> ONLINE</>
+               ) : (
+                 <><Pause size={14} className="opacity-50"/> PAUSADO</>
+               )}
+             </button>
+          </div>
         </div>
       </header>
       
