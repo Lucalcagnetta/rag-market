@@ -292,14 +292,46 @@ const App: React.FC = () => {
   // -- HANDLERS --
   const toggleAutomation = () => {
     initAudio();
-    const newSettings = { ...settings, isRunning: !settings.isRunning };
+    const nextIsRunning = !settings.isRunning;
+    
+    const currentHour = new Date().getHours();
+    const isNightTime = currentHour >= 1 && currentHour < 8;
+    
+    let nextIgnoreNightPause = settings.ignoreNightPause;
+
+    if (nextIsRunning) {
+        // LIGANDO A AUTOMAÇÃO
+        if (isNightTime) {
+            // Se o usuário ligar manualmente DURANTE a noite, assumimos que ele quer forçar o funcionamento
+            nextIgnoreNightPause = true;
+        } else {
+            // Se ligar durante o dia, garantimos que a pausa noturna estará ativa para a próxima noite
+            nextIgnoreNightPause = false;
+        }
+    } else {
+        // DESLIGANDO A AUTOMAÇÃO
+        // Sempre resetamos o override para garantir comportamento padrão na próxima execução
+        nextIgnoreNightPause = false;
+    }
+
+    const newSettings = { 
+        ...settings, 
+        isRunning: nextIsRunning,
+        ignoreNightPause: nextIgnoreNightPause
+    };
+    
     setSettings(newSettings);
     saveData(items, newSettings);
   };
 
   const handleSaveSettings = () => {
     initAudio();
-    const mergedSettings = { ...tempSettings, isRunning: settings.isRunning };
+    // Preservamos o ignoreNightPause e isRunning atuais, salvando apenas o Cookie novo
+    const mergedSettings = { 
+        ...tempSettings, 
+        isRunning: settings.isRunning,
+        ignoreNightPause: settings.ignoreNightPause 
+    };
     setSettings(mergedSettings);
     saveData(items, mergedSettings);
     setShowSettings(false);
@@ -605,17 +637,6 @@ const App: React.FC = () => {
            <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-lg w-full max-w-lg">
               <h3 className="font-bold mb-4">Configurações do Servidor</h3>
               
-              <div className="flex items-center gap-2 mb-4">
-                 <input 
-                   type="checkbox" 
-                   id="ignoreNight"
-                   checked={!!tempSettings.ignoreNightPause}
-                   onChange={e => setTempSettings({...tempSettings, ignoreNightPause: e.target.checked})}
-                   className="rounded bg-slate-900 border-slate-700"
-                 />
-                 <label htmlFor="ignoreNight" className="text-sm text-slate-300">Ignorar Pausa Noturna (Rodar 24h)</label>
-              </div>
-
               <textarea 
                 className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm font-mono text-slate-300 h-24 mb-4"
                 placeholder="Cole o Cookie aqui..."
