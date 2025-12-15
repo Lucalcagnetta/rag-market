@@ -531,12 +531,12 @@ const App: React.FC = () => {
 
       {/* HEADER STICKY GLASS */}
       <header className="sticky top-0 z-30 bg-[#0d1117]/80 backdrop-blur-md border-b border-slate-800/60 mb-6 py-3 px-2 -mx-2 md:-mx-8 md:px-8 shadow-xl transition-all">
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+        <div className="max-w-6xl mx-auto flex flex-row justify-between items-center gap-2 md:gap-4">
           
           {/* LEFT: INFO & STATUS */}
-          <div className="flex items-center justify-between w-full md:w-auto gap-4">
+          <div className="flex items-center gap-2">
              <div className="flex items-center gap-2">
-               <div className="bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50 flex items-center gap-2 shadow-sm">
+               <div className="hidden md:flex bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50 items-center gap-2 shadow-sm">
                  <div className={`w-2 h-2 rounded-full ${settings.isRunning ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-rose-500'}`}></div>
                  <span className="hidden md:inline text-xs font-medium text-slate-300 tracking-wide">
                    {items.length} <span className="text-slate-500">monitors</span>
@@ -590,7 +590,7 @@ const App: React.FC = () => {
           </div>
 
           {/* RIGHT: ACTION BUTTONS */}
-          <div className="flex items-center gap-2 w-full md:w-auto justify-end bg-slate-900/30 md:bg-transparent p-1.5 md:p-0 rounded-xl border border-white/5 md:border-0">
+          <div className="flex items-center gap-2 w-auto justify-end bg-slate-900/30 md:bg-transparent p-1.5 md:p-0 rounded-xl border border-white/5 md:border-0">
              
              {activeAlertsCount > 0 && (
                <button 
