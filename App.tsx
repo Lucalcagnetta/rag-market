@@ -493,7 +493,8 @@ const App: React.FC = () => {
   if (!dataLoaded) return <div className="min-h-screen bg-[#0d1117] flex items-center justify-center text-slate-400"><Activity className="animate-spin mr-2"/> Carregando Nuvem...</div>;
 
   return (
-    <div className="min-h-screen bg-[#0d1117] text-slate-200 p-2 md:p-8 font-sans">
+    // Removido padding da raiz para colar no topo
+    <div className="min-h-screen bg-[#0d1117] text-slate-200 font-sans selection:bg-emerald-500/30">
        <style>{`
         @keyframes pulse-green {
           0% { background-color: rgba(16, 185, 129, 0.05); border-color: rgba(16, 185, 129, 0.4); }
@@ -530,22 +531,38 @@ const App: React.FC = () => {
       `}</style>
 
       {/* HEADER STICKY GLASS */}
-      <header className="sticky top-0 z-30 bg-[#0d1117]/80 backdrop-blur-md border-b border-slate-800/60 mb-6 py-3 px-2 -mx-2 md:-mx-8 md:px-8 shadow-xl transition-all">
-        <div className="max-w-6xl mx-auto flex flex-row justify-between items-center gap-2 md:gap-4">
+      {/* w-full, sem margens negativas, colado no topo */}
+      <header className="sticky top-0 z-40 bg-[#0d1117]/90 backdrop-blur-md border-b border-slate-800/60 shadow-2xl transition-all w-full">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex flex-row justify-between items-center">
           
-          {/* LEFT: INFO & STATUS */}
-          <div className="flex items-center gap-2">
-             <div className="flex items-center gap-2">
-               <div className="hidden md:flex bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50 items-center gap-2 shadow-sm">
+          {/* LEFT: STATUS & ALERTS */}
+          <div className="flex items-center gap-3">
+             {/* Status Capsule - Hidden on Mobile */}
+             <div className="hidden md:flex items-center gap-2">
+               <div className="bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50 flex items-center gap-2 shadow-sm">
                  <div className={`w-2 h-2 rounded-full ${settings.isRunning ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-rose-500'}`}></div>
-                 <span className="hidden md:inline text-xs font-medium text-slate-300 tracking-wide">
+                 <span className="text-xs font-medium text-slate-300 tracking-wide">
                    {items.length} <span className="text-slate-500">monitors</span>
                  </span>
                </div>
-               {saveStatus === 'saving' && (
-                 <span className="text-[10px] text-blue-400 font-mono bg-blue-500/10 px-2 py-1 rounded">SYNC...</span>
-               )}
              </div>
+
+             {/* SYNC INDICATOR */}
+             {saveStatus === 'saving' && (
+                 <span className="text-[10px] text-blue-400 font-mono bg-blue-500/10 px-2 py-1 rounded animate-pulse">SYNC</span>
+             )}
+
+             {/* MARCAR VISTO - Agora aqui na Esquerda para não empurrar os botões da direita */}
+             {activeAlertsCount > 0 && (
+               <button 
+                 onClick={acknowledgeAll} 
+                 className="bg-blue-600 hover:bg-blue-500 text-white px-3 h-[36px] rounded-lg text-xs font-medium flex items-center gap-2 shadow-lg shadow-blue-900/20 transition-all active:scale-95"
+               >
+                  <ListChecks size={16} /> 
+                  <span className="hidden sm:inline">Marcar Visto</span>
+                  <span className="bg-white/20 px-1.5 rounded text-[10px] font-bold">{activeAlertsCount}</span>
+               </button>
+             )}
           </div>
           
           {/* CENTER: CALCULATOR (Desktop Only) */}
@@ -589,20 +606,8 @@ const App: React.FC = () => {
              </div>
           </div>
 
-          {/* RIGHT: ACTION BUTTONS */}
-          <div className="flex items-center gap-2 w-auto justify-end bg-slate-900/30 md:bg-transparent p-1.5 md:p-0 rounded-xl border border-white/5 md:border-0">
-             
-             {activeAlertsCount > 0 && (
-               <button 
-                 onClick={acknowledgeAll} 
-                 className="mr-auto md:mr-2 bg-blue-600/90 hover:bg-blue-500 text-white px-3 h-[36px] rounded-lg text-xs font-medium flex items-center gap-2 shadow-lg shadow-blue-900/20 transition-all hover:scale-105 active:scale-95"
-               >
-                  <ListChecks size={14} /> 
-                  <span className="hidden sm:inline">Marcar Visto</span>
-                  <span className="bg-white/20 px-1.5 rounded text-[10px]">{activeAlertsCount}</span>
-               </button>
-             )}
-
+          {/* RIGHT: ACTION BUTTONS (Static Position) */}
+          <div className="flex items-center gap-2">
              {/* VOLUME */}
              <div className="relative group flex items-center bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-lg h-[36px] px-2 transition-all cursor-pointer">
                 <button 
@@ -652,111 +657,115 @@ const App: React.FC = () => {
         </div>
       </header>
       
-      {/* STATUS BAR */}
-      {settings.isRunning && isNightPause && !settings.ignoreNightPause && (
-        <div className="max-w-6xl mx-auto mb-4 bg-yellow-900/20 border border-yellow-700/50 text-yellow-500 p-2 rounded text-center text-xs flex items-center justify-center gap-2">
-           <Moon size={14} /> Pausa Noturna Automática (Servidor: 01h-08h)
-        </div>
-      )}
+      {/* WRAPPER PRINCIPAL (Repõe o padding que removemos da raiz) */}
+      <main className="p-2 md:p-8 max-w-6xl mx-auto">
 
-      {/* SETTINGS MODAL */}
-      {showSettings && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-           <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-lg w-full max-w-lg">
-              <h3 className="font-bold mb-4">Configurações do Servidor</h3>
-              
-              <textarea 
-                className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm font-mono text-slate-300 h-24 mb-4"
-                placeholder="Cole o Cookie aqui..."
-                value={tempSettings.cookie}
-                onChange={e => setTempSettings({...tempSettings, cookie: e.target.value})}
-              />
-              <div className="flex justify-end gap-2">
-                 <button onClick={() => setShowSettings(false)} className="text-slate-400 px-4 py-2">Cancelar</button>
-                 <button onClick={handleSaveSettings} className="bg-blue-600 text-white px-4 py-2 rounded">Salvar na Nuvem</button>
-              </div>
+        {/* STATUS BAR */}
+        {settings.isRunning && isNightPause && !settings.ignoreNightPause && (
+          <div className="mb-4 bg-yellow-900/20 border border-yellow-700/50 text-yellow-500 p-2 rounded text-center text-xs flex items-center justify-center gap-2">
+             <Moon size={14} /> Pausa Noturna Automática (Servidor: 01h-08h)
+          </div>
+        )}
+
+        {/* SETTINGS MODAL */}
+        {showSettings && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+             <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-lg w-full max-w-lg">
+                <h3 className="font-bold mb-4">Configurações do Servidor</h3>
+                
+                <textarea 
+                  className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm font-mono text-slate-300 h-24 mb-4"
+                  placeholder="Cole o Cookie aqui..."
+                  value={tempSettings.cookie}
+                  onChange={e => setTempSettings({...tempSettings, cookie: e.target.value})}
+                />
+                <div className="flex justify-end gap-2">
+                   <button onClick={() => setShowSettings(false)} className="text-slate-400 px-4 py-2">Cancelar</button>
+                   <button onClick={handleSaveSettings} className="bg-blue-600 text-white px-4 py-2 rounded">Salvar na Nuvem</button>
+                </div>
+             </div>
+          </div>
+        )}
+        
+        {/* EDIT MODAL */}
+        {editingItem && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+             <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-lg w-full max-w-sm shadow-2xl">
+                <h3 className="font-bold mb-4 flex gap-2"><Edit2 size={16}/> Editar Item</h3>
+                <div className="space-y-3">
+                   <input className="w-full bg-slate-950 border border-slate-700 p-2 rounded text-white" value={editingItem.name} onChange={e => setEditingItem({...editingItem, name: e.target.value})} />
+                   <input className="w-full bg-slate-950 border border-slate-700 p-2 rounded text-white" value={editingTargetInput} onChange={e => { setEditingTargetInput(e.target.value); setEditingItem({...editingItem, targetPrice: parseKkInput(e.target.value)}); }} />
+                   <div className="flex justify-end gap-2 mt-4">
+                      <button onClick={() => setEditingItem(null)} className="text-slate-400 px-3">Cancelar</button>
+                      <button onClick={saveEdit} className="bg-blue-600 text-white px-4 py-2 rounded">Salvar</button>
+                   </div>
+                </div>
+             </div>
+          </div>
+        )}
+
+        {/* MAIN LIST */}
+        <div className="bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden shadow-2xl">
+           {/* ADD BAR */}
+           <div className="p-4 bg-[#0d1117] border-b border-[#30363d] flex flex-col md:flex-row gap-2">
+              <input className="flex-1 bg-[#161b22] border border-[#30363d] p-2 rounded text-sm text-white" placeholder="Nome do Item..." value={newItemName} onChange={e => setNewItemName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addNewItem()}/>
+              <input className="w-full md:w-32 bg-[#161b22] border border-[#30363d] p-2 rounded text-sm text-white" placeholder="Preço (30kk)" value={newItemTarget} onChange={e => setNewItemTarget(e.target.value)} onKeyDown={e => e.key === 'Enter' && addNewItem()}/>
+              <button onClick={addNewItem} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold flex items-center justify-center gap-1"><Plus size={16}/> ADD</button>
+           </div>
+
+           {/* ITEMS */}
+           <div className="divide-y divide-[#30363d]">
+              {sortedItems.map(item => {
+                 const isDeal = item.lastPrice && item.lastPrice > 0 && item.lastPrice <= item.targetPrice;
+                 const isActiveEvent = (isDeal || item.hasPriceDrop) && !item.isAck;
+                 
+                 let bgClass = "bg-[#161b22]";
+                 if (isDeal) bgClass = isActiveEvent ? "animate-pulse-green bg-emerald-900/20 border-l-4 border-emerald-500" : "bg-emerald-900/10 border-l-4 border-emerald-700";
+                 else if (isActiveEvent && item.hasPriceDrop) bgClass = "animate-pulse-blue bg-blue-900/20 border-l-4 border-blue-500";
+
+                 return (
+                   <div key={item.id} className={`p-4 flex flex-col md:flex-row items-center gap-4 ${bgClass}`}>
+                      <div className="flex-1 text-center md:text-left w-full">
+                         <div className="font-bold text-white">{item.name}</div>
+                         <div className="flex items-center justify-center md:justify-start gap-2 mt-1">
+                            {item.status === 'LOADING' && <span className="text-[10px] text-blue-400 animate-pulse">Verificando...</span>}
+                            {item.status === 'ERRO' && <span className="text-[10px] text-red-400">{item.message || 'Erro'}</span>}
+                            <span className="text-[10px] text-slate-500 flex items-center gap-1"><Clock size={10}/> {item.lastUpdated ? new Date(item.lastUpdated).toLocaleTimeString().slice(0,5) : '--:--'}</span>
+                         </div>
+                      </div>
+                      
+                      <div className="flex items-center w-full md:w-auto justify-between md:justify-end">
+                          <div className="text-right w-24">
+                             <div className="text-[10px] text-slate-500 font-bold tracking-wider">ALVO</div>
+                             <div className="font-mono text-slate-400">{formatMoney(item.targetPrice)}</div>
+                          </div>
+                          
+                          {/* SEPARADOR VERTICAL */}
+                          <div className="h-8 w-px bg-slate-700 mx-4"></div>
+
+                          <div className="text-right w-28">
+                             <div className="text-[10px] text-slate-500 font-bold tracking-wider">ATUAL</div>
+                             <div className={`font-mono text-lg font-bold ${isDeal ? 'text-emerald-400' : 'text-slate-200'}`}>
+                               {formatMoney(item.lastPrice)}
+                             </div>
+                          </div>
+                      </div>
+
+                      <div className="flex gap-2 w-full md:w-auto justify-center border-t border-slate-800 pt-2 md:pt-0 md:border-0 md:ml-4">
+                         {isActiveEvent && (
+                           <button onClick={() => acknowledgeItem(item.id)} className="bg-emerald-600 text-white p-2 rounded-full shadow-lg"><Eye size={16}/></button>
+                         )}
+                         <button title="Forçar Atualização" onClick={() => resetItem(item.id)} className="text-slate-500 hover:text-emerald-400 p-2"><RefreshCw size={16}/></button>
+                         <button onClick={() => { setEditingItem(item); setEditingTargetInput(formatMoney(item.targetPrice).replace('z','').trim()); }} className="text-slate-500 hover:text-blue-400 p-2"><Edit2 size={16}/></button>
+                         <button onClick={() => removeItem(item.id)} className="text-slate-500 hover:text-red-400 p-2"><Trash2 size={16}/></button>
+                      </div>
+                   </div>
+                 );
+              })}
+              {sortedItems.length === 0 && <div className="p-8 text-center text-slate-500">Adicione itens para o servidor monitorar.</div>}
            </div>
         </div>
-      )}
-      
-      {/* EDIT MODAL */}
-      {editingItem && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-           <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-lg w-full max-w-sm shadow-2xl">
-              <h3 className="font-bold mb-4 flex gap-2"><Edit2 size={16}/> Editar Item</h3>
-              <div className="space-y-3">
-                 <input className="w-full bg-slate-950 border border-slate-700 p-2 rounded text-white" value={editingItem.name} onChange={e => setEditingItem({...editingItem, name: e.target.value})} />
-                 <input className="w-full bg-slate-950 border border-slate-700 p-2 rounded text-white" value={editingTargetInput} onChange={e => { setEditingTargetInput(e.target.value); setEditingItem({...editingItem, targetPrice: parseKkInput(e.target.value)}); }} />
-                 <div className="flex justify-end gap-2 mt-4">
-                    <button onClick={() => setEditingItem(null)} className="text-slate-400 px-3">Cancelar</button>
-                    <button onClick={saveEdit} className="bg-blue-600 text-white px-4 py-2 rounded">Salvar</button>
-                 </div>
-              </div>
-           </div>
-        </div>
-      )}
-
-      {/* MAIN LIST */}
-      <div className="max-w-6xl mx-auto bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden shadow-2xl">
-         {/* ADD BAR */}
-         <div className="p-4 bg-[#0d1117] border-b border-[#30363d] flex flex-col md:flex-row gap-2">
-            <input className="flex-1 bg-[#161b22] border border-[#30363d] p-2 rounded text-sm text-white" placeholder="Nome do Item..." value={newItemName} onChange={e => setNewItemName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addNewItem()}/>
-            <input className="w-full md:w-32 bg-[#161b22] border border-[#30363d] p-2 rounded text-sm text-white" placeholder="Preço (30kk)" value={newItemTarget} onChange={e => setNewItemTarget(e.target.value)} onKeyDown={e => e.key === 'Enter' && addNewItem()}/>
-            <button onClick={addNewItem} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold flex items-center justify-center gap-1"><Plus size={16}/> ADD</button>
-         </div>
-
-         {/* ITEMS */}
-         <div className="divide-y divide-[#30363d]">
-            {sortedItems.map(item => {
-               const isDeal = item.lastPrice && item.lastPrice > 0 && item.lastPrice <= item.targetPrice;
-               const isActiveEvent = (isDeal || item.hasPriceDrop) && !item.isAck;
-               
-               let bgClass = "bg-[#161b22]";
-               if (isDeal) bgClass = isActiveEvent ? "animate-pulse-green bg-emerald-900/20 border-l-4 border-emerald-500" : "bg-emerald-900/10 border-l-4 border-emerald-700";
-               else if (isActiveEvent && item.hasPriceDrop) bgClass = "animate-pulse-blue bg-blue-900/20 border-l-4 border-blue-500";
-
-               return (
-                 <div key={item.id} className={`p-4 flex flex-col md:flex-row items-center gap-4 ${bgClass}`}>
-                    <div className="flex-1 text-center md:text-left w-full">
-                       <div className="font-bold text-white">{item.name}</div>
-                       <div className="flex items-center justify-center md:justify-start gap-2 mt-1">
-                          {item.status === 'LOADING' && <span className="text-[10px] text-blue-400 animate-pulse">Verificando...</span>}
-                          {item.status === 'ERRO' && <span className="text-[10px] text-red-400">{item.message || 'Erro'}</span>}
-                          <span className="text-[10px] text-slate-500 flex items-center gap-1"><Clock size={10}/> {item.lastUpdated ? new Date(item.lastUpdated).toLocaleTimeString().slice(0,5) : '--:--'}</span>
-                       </div>
-                    </div>
-                    
-                    <div className="flex items-center w-full md:w-auto justify-between md:justify-end">
-                        <div className="text-right w-24">
-                           <div className="text-[10px] text-slate-500 font-bold tracking-wider">ALVO</div>
-                           <div className="font-mono text-slate-400">{formatMoney(item.targetPrice)}</div>
-                        </div>
-                        
-                        {/* SEPARADOR VERTICAL */}
-                        <div className="h-8 w-px bg-slate-700 mx-4"></div>
-
-                        <div className="text-right w-28">
-                           <div className="text-[10px] text-slate-500 font-bold tracking-wider">ATUAL</div>
-                           <div className={`font-mono text-lg font-bold ${isDeal ? 'text-emerald-400' : 'text-slate-200'}`}>
-                             {formatMoney(item.lastPrice)}
-                           </div>
-                        </div>
-                    </div>
-
-                    <div className="flex gap-2 w-full md:w-auto justify-center border-t border-slate-800 pt-2 md:pt-0 md:border-0 md:ml-4">
-                       {isActiveEvent && (
-                         <button onClick={() => acknowledgeItem(item.id)} className="bg-emerald-600 text-white p-2 rounded-full shadow-lg"><Eye size={16}/></button>
-                       )}
-                       <button title="Forçar Atualização" onClick={() => resetItem(item.id)} className="text-slate-500 hover:text-emerald-400 p-2"><RefreshCw size={16}/></button>
-                       <button onClick={() => { setEditingItem(item); setEditingTargetInput(formatMoney(item.targetPrice).replace('z','').trim()); }} className="text-slate-500 hover:text-blue-400 p-2"><Edit2 size={16}/></button>
-                       <button onClick={() => removeItem(item.id)} className="text-slate-500 hover:text-red-400 p-2"><Trash2 size={16}/></button>
-                    </div>
-                 </div>
-               );
-            })}
-            {sortedItems.length === 0 && <div className="p-8 text-center text-slate-500">Adicione itens para o servidor monitorar.</div>}
-         </div>
-      </div>
+      </main>
     </div>
   );
 };
