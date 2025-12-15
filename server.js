@@ -25,7 +25,12 @@ if (!fs.existsSync(DATA_DIR)) {
 if (!fs.existsSync(DB_FILE)) {
   fs.writeFileSync(DB_FILE, JSON.stringify({ 
     items: [], 
-    settings: { cookie: '', useProxy: false, proxyUrl: '', isRunning: true } 
+    settings: { 
+      cookie: '', 
+      useProxy: false, 
+      proxyUrl: '', 
+      isRunning: true 
+    } 
   }));
 }
 
@@ -294,6 +299,15 @@ app.get('/api/health', (req, res) => {
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; 
 const LOOP_TICK_MS = 2000; 
 
+// Helper para pegar a hora no fuso de Brasília, independente do servidor
+const getBrazilHour = () => {
+    const date = new Date();
+    // Força o fuso horário para São Paulo
+    const options = { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false };
+    const hourString = new Intl.DateTimeFormat('en-US', options).format(date);
+    return parseInt(hourString, 10);
+};
+
 const startWatchdog = () => {
   setInterval(() => {
     if (!GLOBAL_DB.settings?.isRunning) return;
@@ -361,8 +375,11 @@ const startAutomationLoop = () => {
   
   setInterval(async () => {
     if (!GLOBAL_DB.settings?.isRunning) return;
-    const h = new Date().getHours();
+    
+    // FIX: Usa hora do Brasil, não do servidor (UTC)
+    const h = getBrazilHour();
     if (h >= 1 && h < 8) return;
+
     const now = Date.now();
     const candidates = GLOBAL_DB.items.filter(i => i.nextUpdate <= now && i.status !== 'LOADING');
     if (candidates.length > 0) {
@@ -373,8 +390,11 @@ const startAutomationLoop = () => {
   setTimeout(() => {
     setInterval(async () => {
       if (!GLOBAL_DB.settings?.isRunning) return;
-      const h = new Date().getHours();
+      
+      // FIX: Usa hora do Brasil, não do servidor (UTC)
+      const h = getBrazilHour();
       if (h >= 1 && h < 8) return;
+
       const now = Date.now();
       const candidates = GLOBAL_DB.items.filter(i => i.nextUpdate <= now && i.status !== 'LOADING');
       if (candidates.length > 0) {
