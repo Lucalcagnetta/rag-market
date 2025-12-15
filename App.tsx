@@ -768,7 +768,7 @@ const App: React.FC = () => {
 
                  return (
                    <div key={item.id} className={`p-4 flex flex-col md:flex-row items-center gap-4 ${bgClass}`}>
-                      <div className="w-full md:w-1/3 text-center md:text-left mb-2 md:mb-0">
+                      <div className="flex-1 text-center md:text-left w-full md:w-auto">
                          <div className="font-bold text-white">{item.name}</div>
                          <div className="flex items-center justify-center md:justify-start gap-2 mt-1">
                             {item.status === 'LOADING' && <span className="text-[10px] text-blue-400 animate-pulse">Verificando...</span>}
@@ -777,34 +777,39 @@ const App: React.FC = () => {
                          </div>
                       </div>
                       
-                      <div className="flex flex-1 items-center justify-between md:justify-center gap-4 w-full md:w-auto">
+                      {/* CONTAINER DE PREÇOS + BOTÃO OLHO */}
+                      {/* Mobile: relative + justify-center (para centralizar preços) */}
+                      {/* Desktop: justify-end (para alinhar a direita) */}
+                      <div className="w-full md:w-auto flex items-center justify-center md:justify-end relative min-h-[50px]">
                           
-                          {/* BOTÃO "OLHO" */}
-                          <div className="w-8 flex justify-center">
-                             {isActiveEvent && (
-                               <button 
-                                 onClick={() => acknowledgeItem(item.id)} 
-                                 className="text-emerald-500 hover:text-emerald-300 hover:bg-emerald-500/20 p-2 rounded-full transition-all"
-                                 title="Marcar como visto"
-                               >
-                                  <Eye size={20}/>
-                               </button>
-                             )}
-                          </div>
+                          {/* BOTÃO "OLHO" - Absoluto na esquerda no mobile */}
+                          {isActiveEvent && (
+                               <div className="absolute left-0 md:static md:mr-6 flex items-center">
+                                   <button 
+                                     onClick={() => acknowledgeItem(item.id)} 
+                                     className="text-emerald-500 hover:text-emerald-300 hover:bg-emerald-500/20 p-2 rounded-full transition-all"
+                                     title="Marcar como visto"
+                                   >
+                                      <Eye size={20}/>
+                                   </button>
+                               </div>
+                          )}
 
-                          <div className="text-center w-24">
-                             <div className="text-[10px] text-slate-500 font-bold tracking-wider">ALVO</div>
-                             <div className="font-mono text-slate-400">{formatMoney(item.targetPrice)}</div>
-                          </div>
-                          
-                          {/* SEPARADOR VERTICAL */}
-                          <div className="h-8 w-px bg-slate-700"></div>
+                          {/* BLOCO DE PREÇOS - Centralizado no Mobile via flex do pai */}
+                          <div className="flex items-center justify-center gap-6">
+                              <div className="text-center w-24">
+                                 <div className="text-[10px] text-slate-500 font-bold tracking-wider">ALVO</div>
+                                 <div className="font-mono text-slate-400">{formatMoney(item.targetPrice)}</div>
+                              </div>
+                              
+                              <div className="h-8 w-px bg-slate-700/50"></div>
 
-                          <div className="text-center w-28">
-                             <div className="text-[10px] text-slate-500 font-bold tracking-wider">ATUAL</div>
-                             <div className={`font-mono text-lg font-bold ${isDeal ? 'text-emerald-400' : 'text-slate-200'}`}>
-                               {formatMoney(item.lastPrice)}
-                             </div>
+                              <div className="text-center w-28">
+                                 <div className="text-[10px] text-slate-500 font-bold tracking-wider">ATUAL</div>
+                                 <div className={`font-mono text-lg font-bold ${isDeal ? 'text-emerald-400' : 'text-slate-200'}`}>
+                                   {formatMoney(item.lastPrice)}
+                                 </div>
+                              </div>
                           </div>
                       </div>
 
