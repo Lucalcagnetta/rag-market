@@ -162,7 +162,6 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [editingItem, dataLoaded]);
 
-  // --- LÓGICA DE SOM CORRIGIDA ---
   useEffect(() => {
     if (!dataLoaded) return;
     const prevItems = previousItemsRef.current;
@@ -171,14 +170,10 @@ const App: React.FC = () => {
         const oldItem = prevItems.find(p => p.id === newItem.id);
         const isPendingAck = pendingAcksRef.current.has(newItem.id);
         
-        // Se o item não está em modo de "visto pendente"
         if (!newItem.isAck && !isPendingAck) {
             const isDeal = newItem.lastPrice && newItem.lastPrice > 0 && newItem.lastPrice <= newItem.targetPrice;
             const isCompAlert = newItem.isUserPrice && newItem.lastPrice !== null && newItem.lastPrice !== newItem.userKnownPrice;
             
-            // CONDIÇÃO DE SOM:
-            // 1. Mudou de visto para não visto (isAck trocou)
-            // 2. OU o preço mudou enquanto ainda estava não visto (queda consecutiva)
             const statusChanged = oldItem?.isAck !== false;
             const priceChanged = oldItem && oldItem.lastPrice !== newItem.lastPrice && newItem.lastPrice !== null;
 
@@ -331,24 +326,16 @@ const App: React.FC = () => {
       const aActiveRed = aCompAlert && !a.isAck;
       const bActiveRed = bCompAlert && !b.isAck;
 
-      // PRIORIDADE 1: Novos Negócios (Verde Unseen)
       if (aActiveGreen && !bActiveGreen) return -1;
       if (!aActiveGreen && bActiveGreen) return 1;
-
-      // PRIORIDADE 2: Novas Competições (Vermelho Unseen)
       if (aActiveRed && !bActiveRed) return -1;
       if (!aActiveRed && bActiveRed) return 1;
-
-      // PRIORIDADE 3: Fixados
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
-
-      // PRIORIDADE 4: Alertas Vistos (pra não sumirem da vista geral, mas ficarem abaixo dos novos)
       const aAnyAlert = aDeal || aCompAlert;
       const bAnyAlert = bDeal || bCompAlert;
       if (aAnyAlert && !bAnyAlert) return -1;
       if (!aAnyAlert && bAnyAlert) return 1;
-
       return a.name.localeCompare(b.name);
   });
 
@@ -426,7 +413,7 @@ const App: React.FC = () => {
                 className={`flex items-center gap-2 px-3 h-[36px] rounded-lg text-xs font-bold transition-all border shadow-lg ${filterRedAlerts ? 'bg-rose-600 border-rose-400 text-white shadow-rose-900/40' : (redAlertsTotal > 0 ? 'bg-slate-800 border-rose-500/50 text-rose-400 hover:bg-rose-950/20' : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300')}`}
              >
                 <AlertTriangle size={16} className={filterRedAlerts ? 'animate-pulse' : (redAlertsTotal > 0 ? 'text-rose-500' : '')} />
-                <span className="hidden md:inline uppercase tracking-tighter">Aba Vermelha</span>
+                <span className="hidden md:inline uppercase tracking-tighter">{filterRedAlerts ? 'Ver Geral' : 'Aba Vermelha'}</span>
                 <span className={`px-1.5 rounded text-[10px] font-bold ${filterRedAlerts ? 'bg-white text-rose-600' : (redAlertsTotal > 0 ? 'bg-rose-500 text-white' : 'bg-slate-700 text-slate-500')}`}>{redAlertsTotal}</span>
              </button>
           </div>
@@ -457,6 +444,10 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+             <div className="hidden sm:flex items-center gap-2 bg-slate-900/40 border border-slate-800/60 px-2.5 py-1 rounded-full shadow-inner">
+                <div className={`w-1.5 h-1.5 rounded-full ${settings.isRunning ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Monitorando: <span className="text-slate-200">{items.length}</span></span>
+             </div>
              <div className="relative group flex items-center bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-lg h-[36px] px-2 transition-all cursor-pointer">
                 <button onClick={() => handleVolumeChange(volume === 0 ? 0.5 : 0)} className={`transition-colors ${volume === 0 ? 'text-slate-500' : 'text-blue-400'}`}>{volume === 0 ? <VolumeX size={16}/> : <Volume2 size={16}/>}</button>
                 <div className="w-0 overflow-hidden group-hover:w-20 transition-all duration-300 flex items-center ml-0 group-hover:ml-2">
