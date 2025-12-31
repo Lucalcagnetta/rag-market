@@ -15,7 +15,6 @@ import {
   Moon,
   Volume2,
   VolumeX,
-  ChevronUp,
   X,
   Pin,
   ThumbsUp,
@@ -36,12 +35,14 @@ const App: React.FC = () => {
     return saved !== null ? parseFloat(saved) : 0.5;
   });
 
-  const [calcPrice, setCalcPrice] = useState(() => localStorage.getItem('ro_calc_price') || '');
-  const [calcQty, setCalcQty] = useState('');
+  // --- ESTADOS DA CALCULADORA ---
+  const [calcPrice, setCalcPrice] = useState(() => localStorage.getItem('ro_calc_price') || '0,85');
+  const [calcQty, setCalcQty] = useState('1');
   const [calcTotal, setCalcTotal] = useState('');
+  const isCalculatingRef = useRef(false);
+
   const [isAddExpanded, setIsAddExpanded] = useState(false);
   const [tempSettings, setTempSettings] = useState<Settings>(settings);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'saving' | 'error'>('idle');
   const [showSettings, setShowSettings] = useState(false);
   const [newItemName, setNewItemName] = useState('');
   const [newItemTarget, setNewItemTarget] = useState<string>('');
@@ -51,7 +52,37 @@ const App: React.FC = () => {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const previousItemsRef = useRef<Item[]>([]); 
   const pendingAcksRef = useRef<Set<string>>(new Set());
-  
+
+  // --- LÓGICA DA CALCULADORA (SINCRONIZAÇÃO) ---
+  useEffect(() => {
+    if (isCalculatingRef.current) return;
+    isCalculatingRef.current = true;
+    
+    const p = parseFloat(calcPrice.replace(',', '.'));
+    const q = parseFloat(calcQty.replace(',', '.'));
+    
+    if (!isNaN(p) && !isNaN(q)) {
+      const total = (p * q).toFixed(2).replace('.', ',');
+      setCalcTotal(total);
+      localStorage.setItem('ro_calc_price', calcPrice);
+    }
+    isCalculatingRef.current = false;
+  }, [calcPrice, calcQty]);
+
+  const handleTotalChange = (val: string) => {
+    setCalcTotal(val);
+    if (isCalculatingRef.current) return;
+    isCalculatingRef.current = true;
+    
+    const p = parseFloat(calcPrice.replace(',', '.'));
+    const t = parseFloat(val.replace(',', '.'));
+    
+    if (!isNaN(p) && p > 0 && !isNaN(t)) {
+      setCalcQty(Math.floor(t / p).toString());
+    }
+    isCalculatingRef.current = false;
+  };
+
   const initAudio = useCallback(() => {
     try {
       if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -98,18 +129,14 @@ const App: React.FC = () => {
   }, [initAudio, volume]);
 
   const saveData = useCallback(async (currentItems: Item[], currentSettings: Settings) => {
-    setSaveStatus('saving');
     try {
       await fetch('/api/db', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: currentItems, settings: currentSettings })
       });
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 2000);
     } catch (err) {
       console.error("Failed to save", err);
-      setSaveStatus('error');
     }
   }, []);
 
@@ -397,7 +424,6 @@ const App: React.FC = () => {
                 <span className={`${activeAlertsCount > 0 ? 'bg-white/20 text-white' : 'bg-slate-700 text-slate-500'} px-1.5 rounded text-[10px] font-bold`}>{activeAlertsCount}</span>
              </button>
 
-             {/* BOTÃO DE FILTRO DE VERMELHOS - SEMPRE VISÍVEL NO DESKTOP */}
              <button 
                 onClick={() => setFilterRedAlerts(!filterRedAlerts)} 
                 className={`hidden sm:flex items-center gap-2 px-3 h-[36px] rounded-lg text-xs font-bold transition-all border shadow-lg ${filterRedAlerts ? 'bg-rose-600 border-rose-400 text-white shadow-rose-900/40' : (redAlertsTotal > 0 ? 'bg-slate-800 border-rose-500/50 text-rose-400 hover:bg-rose-950/20' : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300')}`}
@@ -429,7 +455,7 @@ const App: React.FC = () => {
                 <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider text-center">Total (R$)</span>
                 <div className="flex items-center bg-slate-950/50 rounded px-2 py-0.5 w-24 border border-slate-800 focus-within:border-slate-600 transition-colors">
                    <span className="text-[10px] text-amber-600 mr-1">R$</span>
-                   <input className="w-full bg-transparent text-xs font-mono text-amber-100 focus:outline-none placeholder-slate-700" placeholder="0,00" value={calcTotal} onChange={e => setCalcTotal(e.target.value)} />
+                   <input className="w-full bg-transparent text-xs font-mono text-amber-100 focus:outline-none placeholder-slate-700" placeholder="0,00" value={calcTotal} onChange={e => handleTotalChange(e.target.value)} />
                 </div>
              </div>
           </div>
@@ -457,7 +483,7 @@ const App: React.FC = () => {
         {filterRedAlerts && (
           <div className="mb-4 bg-rose-950/40 border border-rose-500/50 text-rose-100 p-3 rounded-lg text-center text-[10px] md:text-xs flex items-center justify-center gap-3 shadow-inner">
             <Filter size={16} className="text-rose-400" /> 
-            <span className="font-bold tracking-tight uppercase">Visualizando apenas disputas de preço (Vermelho)</span>
+            <span className="font-bold tracking-tight uppercase">Filtro Ativado: Mostrando apenas itens em Vermelho</span>
             <button onClick={() => setFilterRedAlerts(false)} className="bg-rose-500 hover:bg-rose-400 text-white px-2 py-1 rounded text-[10px] font-bold shadow-lg transition-all active:scale-95">MOSTRAR TUDO</button>
           </div>
         )}
@@ -489,7 +515,7 @@ const App: React.FC = () => {
                    <div key={item.id} className={`p-4 flex flex-col md:flex-row items-center gap-4 transition-colors ${bgClass}`}>
                       <div className="flex-1 text-center md:text-left w-full">
                          <div className="font-bold text-white flex items-center justify-center md:justify-start gap-2">
-                           {item.isPinned && <Pin size={14} className="text-blue-500 fill-blue-500 drop-shadow-[0_0_3px_rgba(59,130,246,0.5)]" />}
+                           {item.isPinned && <Pin size={14} className="text-blue-500 fill-blue-500" />}
                            {item.isUserPrice && <ThumbsUp size={14} className={`${isCompAlert ? 'text-rose-500 fill-rose-500' : 'text-blue-400 fill-blue-400'}`} />}
                            {item.name}
                          </div>
