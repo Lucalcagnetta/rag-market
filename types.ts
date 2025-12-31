@@ -18,6 +18,7 @@ export interface Item {
   nextUpdate: number; // Timestamp for next scheduled check
   isAck?: boolean; // Se o usuário já "viu" a oferta/evento atual
   hasPriceDrop?: boolean; // Se o preço caiu na última atualização
+  isPinned?: boolean; // Se o item está fixado no topo
 }
 
 export interface Settings {

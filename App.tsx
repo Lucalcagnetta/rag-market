@@ -19,7 +19,8 @@ import {
   VolumeX,
   ChevronDown,
   ChevronUp,
-  X
+  X,
+  Pin
 } from 'lucide-react';
 
 const SYNC_INTERVAL_MS = 2000; // Sincroniza com servidor a cada 2s
@@ -35,10 +36,8 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('ro_volume');
     return saved !== null ? parseFloat(saved) : 0.5;
   });
-  const [showVolumeControl, setShowVolumeControl] = useState(false);
 
   // -- Calculator State --
-  // Inicializa lendo do localStorage, ou vazio se não existir
   const [calcPrice, setCalcPrice] = useState(() => localStorage.getItem('ro_calc_price') || '');
   const [calcQty, setCalcQty] = useState('');
   const [calcTotal, setCalcTotal] = useState('');
@@ -46,168 +45,108 @@ const App: React.FC = () => {
   // -- Add Item UI State --
   const [isAddExpanded, setIsAddExpanded] = useState(false);
 
-  // Salva o preço no localStorage sempre que ele mudar
   useEffect(() => {
     localStorage.setItem('ro_calc_price', calcPrice);
   }, [calcPrice]);
 
-  // -- Calculator Handlers (Bidirectional) --
+  // -- Calculator Handlers --
   const handleCalcPriceChange = (val: string) => {
       setCalcPrice(val);
       const p = parseFloat(val.replace(',', '.'));
       const q = parseFloat(calcQty.replace(',', '.'));
-      
-      if (!isNaN(p) && !isNaN(q)) {
-          setCalcTotal((p * q).toFixed(2).replace('.', ','));
-      } else if (val === '') {
-          setCalcTotal('');
-      }
+      if (!isNaN(p) && !isNaN(q)) setCalcTotal((p * q).toFixed(2).replace('.', ','));
+      else if (val === '') setCalcTotal('');
   };
 
   const handleCalcQtyChange = (val: string) => {
       setCalcQty(val);
       const p = parseFloat(calcPrice.replace(',', '.'));
       const q = parseFloat(val.replace(',', '.'));
-
-      if (!isNaN(p) && !isNaN(q)) {
-          setCalcTotal((p * q).toFixed(2).replace('.', ','));
-      } else if (val === '') {
-          setCalcTotal('');
-      }
+      if (!isNaN(p) && !isNaN(q)) setCalcTotal((p * q).toFixed(2).replace('.', ','));
+      else if (val === '') setCalcTotal('');
   };
 
   const handleCalcTotalChange = (val: string) => {
       setCalcTotal(val);
       const p = parseFloat(calcPrice.replace(',', '.'));
       const t = parseFloat(val.replace(',', '.'));
-
-      if (!isNaN(p) && p !== 0 && !isNaN(t)) {
-          // Calcula a quantidade inversa: Total / Preço
-          const result = t / p;
-          // Formata para evitar dizimas muito longas, max 3 casas decimais para Kks
-          setCalcQty(parseFloat(result.toFixed(3)).toString().replace('.', ','));
-      } else if (val === '') {
-          setCalcQty('');
-      }
+      if (!isNaN(p) && p !== 0 && !isNaN(t)) setCalcQty(parseFloat((t / p).toFixed(3)).toString().replace('.', ','));
+      else if (val === '') setCalcQty('');
   };
 
-  // Local state for settings form
   const [tempSettings, setTempSettings] = useState<Settings>(settings);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'saving' | 'error'>('idle');
-
   const [showSettings, setShowSettings] = useState(false);
   
-  // Inputs for New Item
   const [newItemName, setNewItemName] = useState('');
   const [newItemTarget, setNewItemTarget] = useState<string>('');
-
-  // Editing State
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [editingTargetInput, setEditingTargetInput] = useState<string>('');
 
-  // -- Refs & Audio --
   const audioCtxRef = useRef<AudioContext | null>(null);
   const previousItemsRef = useRef<Item[]>([]); 
-  
-  // -- FIX: Pending ACKs Ref --
-  // Armazena IDs que o usuário marcou como visto, mas o servidor ainda não confirmou.
-  // Isso evita que o polling do servidor sobrescreva o estado local e toque o som novamente.
   const pendingAcksRef = useRef<Set<string>>(new Set());
   
-  // -- AUDIO HELPERS --
   const initAudio = useCallback(() => {
     try {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      }
-      if (audioCtxRef.current.state === 'suspended') {
-        audioCtxRef.current.resume();
-      }
+      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
     } catch (e) { console.error(e); }
   }, []);
 
-  // Handle Volume Change
   const handleVolumeChange = (newVol: number) => {
       setVolume(newVol);
       localStorage.setItem('ro_volume', newVol.toString());
   };
 
-  // Unlock Audio on First Interaction
   useEffect(() => {
     const handleInteraction = () => {
-        if (!audioCtxRef.current) {
-            audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-        }
+        if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
         if (audioCtxRef.current.state === 'suspended') {
             audioCtxRef.current.resume().then(() => {
-                ['click', 'touchstart', 'keydown'].forEach(evt => 
-                    window.removeEventListener(evt, handleInteraction)
-                );
+                ['click', 'touchstart', 'keydown'].forEach(evt => window.removeEventListener(evt, handleInteraction));
             }).catch(console.error);
         }
     };
-
-    ['click', 'touchstart', 'keydown'].forEach(evt => 
-        window.addEventListener(evt, handleInteraction)
-    );
-
-    return () => {
-        ['click', 'touchstart', 'keydown'].forEach(evt => 
-            window.removeEventListener(evt, handleInteraction)
-        );
-    };
+    ['click', 'touchstart', 'keydown'].forEach(evt => window.addEventListener(evt, handleInteraction));
+    return () => ['click', 'touchstart', 'keydown'].forEach(evt => window.removeEventListener(evt, handleInteraction));
   }, []);
 
   const playSound = useCallback((type: 'deal' | 'drop') => {
-    if (volume === 0) return; // Mudo
-
+    if (volume === 0) return;
     try {
       if (!audioCtxRef.current) initAudio();
       const ctx = audioCtxRef.current;
       if (!ctx) return;
       const now = ctx.currentTime;
-      
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-
       const merger = ctx.createChannelMerger(2);
-      
       osc.connect(gain);
       gain.connect(merger, 0, 0); 
       gain.connect(merger, 0, 1);
-      
       merger.connect(ctx.destination);
-
-      // Usa o volume do estado
       const targetVol = volume; 
-
       if (type === 'deal') {
-        // SOM VERDE
         osc.type = 'square';
         osc.frequency.setValueAtTime(523.25, now);
         osc.frequency.setValueAtTime(1046.50, now + 0.15);
-        
         gain.gain.setValueAtTime(targetVol, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
-        
         osc.start(now);
         osc.stop(now + 0.6);
       } else {
-        // SOM AZUL
         osc.type = 'triangle';
         osc.frequency.setValueAtTime(880, now);
         osc.frequency.exponentialRampToValueAtTime(440, now + 0.3);
-        
         gain.gain.setValueAtTime(targetVol, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
-        
         osc.start(now);
         osc.stop(now + 0.3);
       }
     } catch (e) { console.error(e); }
   }, [initAudio, volume]);
 
-  // -- API CLIENT --
   const saveData = useCallback(async (currentItems: Item[], currentSettings: Settings) => {
     setSaveStatus('saving');
     try {
@@ -224,7 +163,6 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // -- MAIN LOOP (POLLING) --
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -232,113 +170,58 @@ const App: React.FC = () => {
         if (res.ok) {
           const data = await res.json();
           if (!editingItem) {
-             // Lógica de Fusão (Merge) para evitar Glitch de ACK
              const mergedItems = (data.items || []).map((serverItem: Item) => {
-                 // Se este item está na nossa lista de "Aguardando Confirmação do Servidor"
                  if (pendingAcksRef.current.has(serverItem.id)) {
-                     // Se o servidor JÁ marcou como visto, removemos da pendência
                      if (serverItem.isAck) {
                          pendingAcksRef.current.delete(serverItem.id);
                          return serverItem;
-                     } 
-                     // Se o servidor AINDA NÃO marcou, forçamos o estado local como VISTO
-                     // para evitar que o som toque novamente
-                     else {
-                         return { ...serverItem, isAck: true, hasPriceDrop: false };
-                     }
+                     } else return { ...serverItem, isAck: true, hasPriceDrop: false };
                  }
                  return serverItem;
              });
-
              setItems(mergedItems);
              setSettings(data.settings || INITIAL_SETTINGS);
-             
-             if (!dataLoaded) {
-                 setDataLoaded(true);
-                 setTempSettings(data.settings || INITIAL_SETTINGS);
-             }
+             if (!dataLoaded) { setDataLoaded(true); setTempSettings(data.settings || INITIAL_SETTINGS); }
           }
         }
       } catch (e) { console.error("Sync error", e); }
     };
-
     fetchData(); 
     const interval = setInterval(fetchData, SYNC_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [editingItem, dataLoaded]);
 
-  // -- SOUND EFFECT LOGIC --
   useEffect(() => {
     if (!dataLoaded) return;
-    
     const prevItems = previousItemsRef.current;
-    
     items.forEach(newItem => {
         const oldItem = prevItems.find(p => p.id === newItem.id);
         const isPendingAck = pendingAcksRef.current.has(newItem.id);
-        
-        // Só toca som se:
-        // 1. O item NÃO está visto (é um alerta ativo)
-        // 2. O item NÃO está pendente de confirmação de leitura (evita som ao clicar em "Visto")
-        // 3. E (Ele era novo na lista OU ele JÁ estava visto antes OU ele mudou de timestamp)
-        // A lógica do pendingAcksRef acima garante que o newItem.isAck não reverta para false acidentalmente.
         if (!newItem.isAck && !isPendingAck && (oldItem?.isAck !== false)) {
             const isDeal = newItem.lastPrice && newItem.lastPrice <= newItem.targetPrice;
-            if (isDeal) {
-                playSound('deal');
-            } else if (newItem.hasPriceDrop) {
-                playSound('drop');
-            }
+            if (isDeal) playSound('deal');
+            else if (newItem.hasPriceDrop) playSound('drop');
         }
     });
-
     previousItemsRef.current = items;
   }, [items, dataLoaded, playSound]);
 
-
-  // -- HANDLERS --
   const toggleAutomation = () => {
     initAudio();
     const nextIsRunning = !settings.isRunning;
-    
     const currentHour = new Date().getHours();
     const isNightTime = currentHour >= 1 && currentHour < 8;
-    
     let nextIgnoreNightPause = settings.ignoreNightPause;
-
-    if (nextIsRunning) {
-        // LIGANDO A AUTOMAÇÃO
-        if (isNightTime) {
-            // Se o usuário ligar manualmente DURANTE a noite, assumimos que ele quer forçar o funcionamento
-            nextIgnoreNightPause = true;
-        } else {
-            // Se ligar durante o dia, garantimos que a pausa noturna estará ativa para a próxima noite
-            nextIgnoreNightPause = false;
-        }
-    } else {
-        // DESLIGANDO A AUTOMAÇÃO
-        // Sempre resetamos o override para garantir comportamento padrão na próxima execução
-        nextIgnoreNightPause = false;
-    }
-
-    const newSettings = { 
-        ...settings, 
-        isRunning: nextIsRunning,
-        ignoreNightPause: nextIgnoreNightPause
-    };
-    
+    if (nextIsRunning) nextIgnoreNightPause = isNightTime;
+    else nextIgnoreNightPause = false;
+    const newSettings = { ...settings, isRunning: nextIsRunning, ignoreNightPause: nextIgnoreNightPause };
     setSettings(newSettings);
     saveData(items, newSettings);
   };
 
   const handleSaveSettings = () => {
     initAudio();
-    // Preservamos o ignoreNightPause e isRunning atuais, salvando apenas o Cookie novo
-    const mergedSettings = { 
-        ...tempSettings, 
-        isRunning: settings.isRunning,
-        ignoreNightPause: settings.ignoreNightPause 
-    };
+    const mergedSettings = { ...tempSettings, isRunning: settings.isRunning, ignoreNightPause: settings.ignoreNightPause };
     setSettings(mergedSettings);
     saveData(items, mergedSettings);
     setShowSettings(false);
@@ -350,18 +233,15 @@ const App: React.FC = () => {
     let multiplier = 1;
     if (numStr.includes('kk')) { multiplier = 1000000; numStr = numStr.replace('kk', ''); } 
     else if (numStr.includes('k')) { multiplier = 1000; numStr = numStr.replace('k', ''); } 
-    else if (numStr.includes('z')) { numStr = numStr.replace('z', ''); }
-    else { const tempNum = parseFloat(numStr); if (!isNaN(tempNum) && tempNum < 1000 && tempNum > 0) multiplier = 1000000; }
+    else if (numStr.includes('z')) numStr = numStr.replace('z', '');
+    else { const t = parseFloat(numStr); if (!isNaN(t) && t < 1000 && t > 0) multiplier = 1000000; }
     const num = parseFloat(numStr);
     return isNaN(num) ? 0 : Math.floor(num * multiplier);
   };
 
   const formatMoney = (val: number | null) => {
     if (val === null) return '--';
-    const floorValue = (value: number, decimals: number) => {
-      const factor = Math.pow(10, decimals);
-      return Math.floor(value * factor) / factor;
-    };
+    const floorValue = (v: number, d: number) => Math.floor(v * Math.pow(10, d)) / Math.pow(10, d);
     if (val >= 1000000) return floorValue(val / 1000000, 2).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + 'kk';
     if (val >= 1000) return floorValue(val / 1000, 1).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + 'k';
     return val.toLocaleString('pt-BR'); 
@@ -371,23 +251,13 @@ const App: React.FC = () => {
     initAudio();
     if (!newItemName.trim()) return;
     const target = parseKkInput(newItemTarget) || 1000000;
-    const newItem: Item = {
-      id: Date.now().toString(),
-      name: newItemName.trim(),
-      targetPrice: target,
-      lastPrice: null,
-      lastUpdated: null,
-      status: Status.IDLE,
-      nextUpdate: 0,
-      isAck: false,
-      hasPriceDrop: false
-    };
+    const newItem: Item = { id: Date.now().toString(), name: newItemName.trim(), targetPrice: target, lastPrice: null, lastUpdated: null, status: Status.IDLE, nextUpdate: 0, isAck: false, hasPriceDrop: false, isPinned: false };
     const newList = [...items, newItem];
     setItems(newList);
     saveData(newList, settings);
     setNewItemName('');
     setNewItemTarget('');
-    setIsAddExpanded(false); // Fecha o menu no mobile após adicionar
+    setIsAddExpanded(false);
   };
 
   const removeItem = (id: string) => {
@@ -399,54 +269,33 @@ const App: React.FC = () => {
   };
 
   const resetItem = (id: string) => {
-      const newList = items.map(i => {
-          if (i.id === id) {
-              return { 
-                  ...i, 
-                  lastPrice: null, 
-                  lastUpdated: null, 
-                  status: Status.IDLE, 
-                  nextUpdate: 0,
-                  message: undefined,
-                  isAck: true 
-              };
-          }
-          return i;
-      });
+      const newList = items.map(i => i.id === id ? { ...i, lastPrice: null, lastUpdated: null, status: Status.IDLE, nextUpdate: 0, message: undefined, isAck: true } : i);
       setItems(newList);
       saveData(newList, settings);
   };
 
+  const togglePin = (id: string) => {
+    initAudio();
+    const newList = items.map(i => i.id === id ? { ...i, isPinned: !i.isPinned } : i);
+    setItems(newList);
+    saveData(newList, settings);
+  };
+
   const acknowledgeAll = async () => {
     if (activeAlertsCount === 0) return;
-    
     if (confirm("Marcar tudo como visto?")) {
-      // Adiciona todos aos pendentes
       items.forEach(i => pendingAcksRef.current.add(i.id));
-
       const newList = items.map(i => ({ ...i, isAck: true, hasPriceDrop: false }));
       setItems(newList);
-      
-      try {
-        await fetch('/api/ack-all', { method: 'POST' });
-      } catch (e) {
-        console.error("Failed to ack all", e);
-      }
+      try { await fetch('/api/ack-all', { method: 'POST' }); } catch (e) { console.error(e); }
     }
   };
   
   const acknowledgeItem = async (id: string) => {
-      // Marca como pendente de confirmação do servidor
       pendingAcksRef.current.add(id);
-
       const newList = items.map(i => i.id === id ? { ...i, isAck: true, hasPriceDrop: false } : i);
       setItems(newList);
-
-      try {
-          await fetch(`/api/ack/${id}`, { method: 'POST' });
-      } catch (e) {
-          console.error("Failed to ack item", e);
-      }
+      try { await fetch(`/api/ack/${id}`, { method: 'POST' }); } catch (e) { console.error(e); }
   };
 
   const saveEdit = () => {
@@ -463,47 +312,41 @@ const App: React.FC = () => {
       
       const aActive = aDeal && !a.isAck;
       const bActive = bDeal && !b.isAck;
+      
+      // 1. Prioridade Máxima: Alertas Ativos (Não Vistos)
       if (aActive && !bActive) return -1;
       if (!aActive && bActive) return 1;
       
+      // 2. Segunda Prioridade: Itens Fixados (Pins)
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+      
+      // 3. Terceira Prioridade: Promoções já vistas
       if (aDeal && !bDeal) return -1;
       if (!aDeal && bDeal) return 1;
       
+      // 4. Alfabética
       return a.name.localeCompare(b.name);
   });
 
   const activeAlertsCount = items.filter(i => ((i.lastPrice && i.lastPrice <= i.targetPrice) || i.hasPriceDrop) && !i.isAck).length;
-  const currentHour = new Date().getHours();
-  const isNightPause = currentHour >= 1 && currentHour < 8;
+  const isNightPause = new Date().getHours() >= 1 && new Date().getHours() < 8;
 
-  // -- EFEITO DE ABA PISCANDO (BROWSER TAB FLASHING) --
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
-    const defaultTitle = "Ragnarok Market Tracker";
-
     if (activeAlertsCount > 0) {
        let state = false;
        interval = setInterval(() => {
-          document.title = state 
-            ? `(${activeAlertsCount}) 🔔 ALERTA!` 
-            : `(${activeAlertsCount}) 💰 OPORTUNIDADE!`;
+          document.title = state ? `(${activeAlertsCount}) 🔔 ALERTA!` : `(${activeAlertsCount}) 💰 OPORTUNIDADE!`;
           state = !state;
-       }, 1000); // Pisca a cada 1 segundo
-    } else {
-       document.title = defaultTitle;
-    }
-
-    return () => {
-       clearInterval(interval);
-       // Só reseta se o count zerar, para evitar flicker durante updates
-       if (activeAlertsCount === 0) document.title = defaultTitle; 
-    };
+       }, 1000);
+    } else document.title = "Ragnarok Market Tracker";
+    return () => clearInterval(interval);
   }, [activeAlertsCount]);
 
   if (!dataLoaded) return <div className="min-h-screen bg-[#0d1117] flex items-center justify-center text-slate-400"><Activity className="animate-spin mr-2"/> Carregando Nuvem...</div>;
 
   return (
-    // Removido padding da raiz para colar no topo
     <div className="min-h-screen bg-[#0d1117] text-slate-200 font-sans selection:bg-emerald-500/30">
        <style>{`
         @keyframes pulse-green {
@@ -512,98 +355,45 @@ const App: React.FC = () => {
           100% { background-color: rgba(16, 185, 129, 0.05); border-color: rgba(16, 185, 129, 0.4); }
         }
         .animate-pulse-green { animation: pulse-green 1.5s infinite; }
-        
         @keyframes pulse-blue {
           0% { background-color: rgba(59, 130, 246, 0.05); border-color: rgba(59, 130, 246, 0.4); }
           50% { background-color: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 1); box-shadow: 0 0 20px rgba(59, 130, 246, 0.3); }
           100% { background-color: rgba(59, 130, 246, 0.05); border-color: rgba(59, 130, 246, 0.4); }
         }
         .animate-pulse-blue { animation: pulse-blue 1.5s infinite; }
-        
-        input[type=range] {
-          -webkit-appearance: none;
-          background: transparent;
-        }
-        input[type=range]::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          height: 12px;
-          width: 12px;
-          border-radius: 50%;
-          background: #3b82f6;
-          margin-top: -4px;
-        }
-        input[type=range]::-webkit-slider-runnable-track {
-          width: 100%;
-          height: 4px;
-          background: #334155;
-          border-radius: 2px;
-        }
+        input[type=range] { -webkit-appearance: none; background: transparent; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 12px; width: 12px; border-radius: 50%; background: #3b82f6; margin-top: -4px; }
+        input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 4px; background: #334155; border-radius: 2px; }
       `}</style>
 
-      {/* HEADER STICKY GLASS */}
-      {/* w-full, sem margens negativas, colado no topo */}
       <header className="sticky top-0 z-40 bg-[#0d1117]/90 backdrop-blur-md border-b border-slate-800/60 shadow-2xl transition-all w-full">
         <div className="max-w-6xl mx-auto px-4 py-3 flex flex-row justify-between items-center">
-          
-          {/* LEFT: STATUS & ALERTS */}
           <div className="flex items-center gap-3">
-             {/* Status Capsule - Hidden on Mobile */}
              <div className="hidden md:flex items-center gap-2">
                <div className="bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50 flex items-center gap-2 shadow-sm">
                  <div className={`w-2 h-2 rounded-full ${settings.isRunning ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-rose-500'}`}></div>
-                 <span className="text-xs font-medium text-slate-300 tracking-wide">
-                   {items.length} <span className="text-slate-500">monitors</span>
-                 </span>
+                 <span className="text-xs font-medium text-slate-300 tracking-wide">{items.length} <span className="text-slate-500">monitors</span></span>
                </div>
              </div>
-
-             {/* SYNC INDICATOR */}
-             {saveStatus === 'saving' && (
-                 <span className="text-[10px] text-blue-400 font-mono bg-blue-500/10 px-2 py-1 rounded animate-pulse">SYNC</span>
-             )}
-
-             {/* MARCAR VISTO - Sempre visível, cinza se 0 */}
-             <button 
-               onClick={acknowledgeAll} 
-               disabled={activeAlertsCount === 0}
-               className={`px-3 h-[36px] rounded-lg text-xs font-medium flex items-center gap-2 shadow-lg transition-all active:scale-95 ${
-                 activeAlertsCount > 0 
-                    ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/20' 
-                    : 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700'
-               }`}
-             >
-                <ListChecks size={16} /> 
-                <span className="hidden sm:inline">Marcar Visto</span>
-                <span className={`${activeAlertsCount > 0 ? 'bg-white/20 text-white' : 'bg-slate-700 text-slate-500'} px-1.5 rounded text-[10px] font-bold`}>
-                    {activeAlertsCount}
-                </span>
+             {saveStatus === 'saving' && <span className="text-[10px] text-blue-400 font-mono bg-blue-500/10 px-2 py-1 rounded animate-pulse">SYNC</span>}
+             <button onClick={acknowledgeAll} disabled={activeAlertsCount === 0} className={`px-3 h-[36px] rounded-lg text-xs font-medium flex items-center gap-2 shadow-lg transition-all active:scale-95 ${activeAlertsCount > 0 ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/20' : 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700'}`}>
+                <ListChecks size={16} /><span className="hidden sm:inline">Marcar Visto</span>
+                <span className={`${activeAlertsCount > 0 ? 'bg-white/20 text-white' : 'bg-slate-700 text-slate-500'} px-1.5 rounded text-[10px] font-bold`}>{activeAlertsCount}</span>
              </button>
           </div>
-          
-          {/* CENTER: CALCULATOR (Desktop Only) */}
           <div className="hidden md:flex items-center gap-1 bg-slate-900/50 border border-slate-800 p-1.5 rounded-lg shadow-inner">
              <div className="flex flex-col px-1">
                 <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider text-center">Preço (KK)</span>
                 <div className="flex items-center bg-slate-950/50 rounded px-2 py-0.5 w-24 border border-slate-800 focus-within:border-slate-600 transition-colors">
                    <span className="text-[10px] text-emerald-600 mr-1">$</span>
-                   <input 
-                     className="w-full bg-transparent text-xs font-mono text-emerald-100 focus:outline-none placeholder-slate-700"
-                     placeholder="0,00"
-                     value={calcPrice}
-                     onChange={e => handleCalcPriceChange(e.target.value)}
-                   />
+                   <input className="w-full bg-transparent text-xs font-mono text-emerald-100 focus:outline-none placeholder-slate-700" placeholder="0,00" value={calcPrice} onChange={e => handleCalcPriceChange(e.target.value)} />
                 </div>
              </div>
              <span className="text-slate-600 pb-3">×</span>
              <div className="flex flex-col px-1">
                 <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider text-center">Qtd</span>
                 <div className="flex items-center bg-slate-950/50 rounded px-2 py-0.5 w-20 border border-slate-800 focus-within:border-slate-600 transition-colors">
-                   <input 
-                     className="w-full bg-transparent text-xs font-mono text-blue-100 focus:outline-none text-center placeholder-slate-700"
-                     placeholder="1"
-                     value={calcQty}
-                     onChange={e => handleCalcQtyChange(e.target.value)}
-                   />
+                   <input className="w-full bg-transparent text-xs font-mono text-blue-100 focus:outline-none text-center placeholder-slate-700" placeholder="1" value={calcQty} onChange={e => handleCalcQtyChange(e.target.value)} />
                 </div>
              </div>
              <span className="text-slate-600 pb-3">=</span>
@@ -611,89 +401,34 @@ const App: React.FC = () => {
                 <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider text-center">Total (R$)</span>
                 <div className="flex items-center bg-slate-950/50 rounded px-2 py-0.5 w-24 border border-slate-800 focus-within:border-slate-600 transition-colors">
                    <span className="text-[10px] text-amber-600 mr-1">R$</span>
-                   <input 
-                     className="w-full bg-transparent text-xs font-mono text-amber-100 focus:outline-none placeholder-slate-700"
-                     placeholder="0,00"
-                     value={calcTotal}
-                     onChange={e => handleCalcTotalChange(e.target.value)}
-                   />
+                   <input className="w-full bg-transparent text-xs font-mono text-amber-100 focus:outline-none placeholder-slate-700" placeholder="0,00" value={calcTotal} onChange={e => handleCalcTotalChange(e.target.value)} />
                 </div>
              </div>
           </div>
-
-          {/* RIGHT: ACTION BUTTONS (Static Position) */}
           <div className="flex items-center gap-2">
-             {/* VOLUME */}
              <div className="relative group flex items-center bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-lg h-[36px] px-2 transition-all cursor-pointer">
-                <button 
-                  onClick={() => handleVolumeChange(volume === 0 ? 0.5 : 0)} 
-                  className={`transition-colors ${volume === 0 ? 'text-slate-500' : 'text-blue-400'}`}
-                  title="Volume"
-                >
-                   {volume === 0 ? <VolumeX size={16}/> : <Volume2 size={16}/>}
-                </button>
+                <button onClick={() => handleVolumeChange(volume === 0 ? 0.5 : 0)} className={`transition-colors ${volume === 0 ? 'text-slate-500' : 'text-blue-400'}`} title="Volume">{volume === 0 ? <VolumeX size={16}/> : <Volume2 size={16}/>}</button>
                 <div className="w-0 overflow-hidden group-hover:w-20 transition-all duration-300 flex items-center ml-0 group-hover:ml-2">
-                   <input 
-                     type="range" 
-                     min="0" 
-                     max="1" 
-                     step="0.05" 
-                     value={volume} 
-                     onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-                     className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer"
-                   />
+                   <input type="range" min="0" max="1" step="0.05" value={volume} onChange={(e) => handleVolumeChange(parseFloat(e.target.value))} className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer" />
                 </div>
              </div>
-
-             {/* SETTINGS */}
-             <button 
-               onClick={() => setShowSettings(!showSettings)} 
-               className="bg-slate-800 hover:bg-slate-700 border border-slate-700 h-[36px] w-[36px] flex items-center justify-center rounded-lg transition-all text-slate-400 hover:text-white"
-             >
-                <SettingsIcon size={16} />
-             </button>
-             
-             {/* PLAY/PAUSE */}
-             <button 
-               onClick={toggleAutomation}
-               className={`h-[36px] px-4 rounded-lg font-bold text-xs flex items-center gap-2 transition-all shadow-lg border ${
-                 settings.isRunning 
-                   ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-500/50 text-white shadow-emerald-900/20' 
-                   : 'bg-slate-800 hover:bg-slate-700 border-rose-900/30 text-rose-400 shadow-rose-900/10'
-               }`}
-             >
-               {settings.isRunning ? (
-                 <><div className="w-2 h-2 bg-white rounded-full mr-1"></div> ONLINE</>
-               ) : (
-                 <><Pause size={14} className="opacity-50"/> PAUSADO</>
-               )}
+             <button onClick={() => setShowSettings(!showSettings)} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 h-[36px] w-[36px] flex items-center justify-center rounded-lg transition-all text-slate-400 hover:text-white"><SettingsIcon size={16} /></button>
+             <button onClick={toggleAutomation} className={`h-[36px] px-4 rounded-lg font-bold text-xs flex items-center gap-2 transition-all shadow-lg border ${settings.isRunning ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-500/50 text-white shadow-emerald-900/20' : 'bg-slate-800 hover:bg-slate-700 border-rose-900/30 text-rose-400 shadow-rose-900/10'}`}>
+               {settings.isRunning ? <><div className="w-2 h-2 bg-white rounded-full mr-1"></div> ONLINE</> : <><Pause size={14} className="opacity-50"/> PAUSADO</>}
              </button>
           </div>
         </div>
       </header>
       
-      {/* WRAPPER PRINCIPAL (Repõe o padding que removemos da raiz) */}
       <main className="p-2 md:p-8 max-w-6xl mx-auto">
-
-        {/* STATUS BAR */}
         {settings.isRunning && isNightPause && !settings.ignoreNightPause && (
-          <div className="mb-4 bg-yellow-900/20 border border-yellow-700/50 text-yellow-500 p-2 rounded text-center text-xs flex items-center justify-center gap-2">
-             <Moon size={14} /> Pausa Noturna Automática (Servidor: 01h-08h)
-          </div>
+          <div className="mb-4 bg-yellow-900/20 border border-yellow-700/50 text-yellow-500 p-2 rounded text-center text-xs flex items-center justify-center gap-2"><Moon size={14} /> Pausa Noturna Automática (Servidor: 01h-08h)</div>
         )}
-
-        {/* SETTINGS MODAL */}
         {showSettings && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
              <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-lg w-full max-w-lg">
                 <h3 className="font-bold mb-4">Configurações do Servidor</h3>
-                
-                <textarea 
-                  className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm font-mono text-slate-300 h-24 mb-4"
-                  placeholder="Cole o Cookie aqui..."
-                  value={tempSettings.cookie}
-                  onChange={e => setTempSettings({...tempSettings, cookie: e.target.value})}
-                />
+                <textarea className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm font-mono text-slate-300 h-24 mb-4" placeholder="Cole o Cookie aqui..." value={tempSettings.cookie} onChange={e => setTempSettings({...tempSettings, cookie: e.target.value})} />
                 <div className="flex justify-end gap-2">
                    <button onClick={() => setShowSettings(false)} className="text-slate-400 px-4 py-2">Cancelar</button>
                    <button onClick={handleSaveSettings} className="bg-blue-600 text-white px-4 py-2 rounded">Salvar na Nuvem</button>
@@ -701,8 +436,6 @@ const App: React.FC = () => {
              </div>
           </div>
         )}
-        
-        {/* EDIT MODAL */}
         {editingItem && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
              <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-lg w-full max-w-sm shadow-2xl">
@@ -718,102 +451,60 @@ const App: React.FC = () => {
              </div>
           </div>
         )}
-
-        {/* MAIN LIST */}
         <div className="bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden shadow-2xl">
-           
-           {/* ADD BAR (COLLAPSIBLE ON MOBILE) */}
            <div className="p-4 bg-[#0d1117] border-b border-[#30363d]">
-               {/* Mobile Toggle Button */}
                <div className="md:hidden">
-                   {!isAddExpanded ? (
-                       <button 
-                         onClick={() => setIsAddExpanded(true)}
-                         className="w-full bg-slate-800 hover:bg-slate-700 text-blue-400 py-3 rounded-lg border border-slate-700/50 flex items-center justify-center gap-2 font-medium transition-colors"
-                       >
-                           <Plus size={18} /> Novo Item
-                       </button>
-                   ) : (
-                       <button 
-                         onClick={() => setIsAddExpanded(false)}
-                         className="w-full mb-3 text-slate-500 text-xs flex items-center justify-center gap-1 hover:text-slate-300"
-                       >
-                           <ChevronUp size={14} /> Recolher
-                       </button>
-                   )}
+                   {!isAddExpanded ? <button onClick={() => setIsAddExpanded(true)} className="w-full bg-slate-800 hover:bg-slate-700 text-blue-400 py-3 rounded-lg border border-slate-700/50 flex items-center justify-center gap-2 font-medium transition-colors"><Plus size={18} /> Novo Item</button> : <button onClick={() => setIsAddExpanded(false)} className="w-full mb-3 text-slate-500 text-xs flex items-center justify-center gap-1 hover:text-slate-300"><ChevronUp size={14} /> Recolher</button>}
                </div>
-
-               {/* Inputs Container - Hidden on Mobile unless expanded, always Block on Desktop */}
                <div className={`${isAddExpanded ? 'flex' : 'hidden'} md:flex flex-col md:flex-row gap-2`}>
                   <input className="flex-1 bg-[#161b22] border border-[#30363d] p-2 rounded text-sm text-white focus:border-blue-500 focus:outline-none transition-colors" placeholder="Nome do Item..." value={newItemName} onChange={e => setNewItemName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addNewItem()}/>
                   <input className="w-full md:w-32 bg-[#161b22] border border-[#30363d] p-2 rounded text-sm text-white focus:border-blue-500 focus:outline-none transition-colors" placeholder="Preço (30kk)" value={newItemTarget} onChange={e => setNewItemTarget(e.target.value)} onKeyDown={e => e.key === 'Enter' && addNewItem()}/>
                   <div className="flex gap-2">
                      <button onClick={addNewItem} className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold flex items-center justify-center gap-1 shadow-lg shadow-blue-900/20"><Plus size={16}/> ADD</button>
-                     {isAddExpanded && (
-                       <button onClick={() => setIsAddExpanded(false)} className="md:hidden bg-slate-800 text-slate-400 px-3 rounded hover:bg-slate-700"><X size={18}/></button>
-                     )}
+                     {isAddExpanded && <button onClick={() => setIsAddExpanded(false)} className="md:hidden bg-slate-800 text-slate-400 px-3 rounded hover:bg-slate-700"><X size={18}/></button>}
                   </div>
                </div>
            </div>
-
-           {/* ITEMS */}
            <div className="divide-y divide-[#30363d]">
               {sortedItems.map(item => {
                  const isDeal = item.lastPrice && item.lastPrice > 0 && item.lastPrice <= item.targetPrice;
                  const isActiveEvent = (isDeal || item.hasPriceDrop) && !item.isAck;
-                 
                  let bgClass = "bg-[#161b22]";
                  if (isDeal) bgClass = isActiveEvent ? "animate-pulse-green bg-emerald-900/20 border-l-4 border-emerald-500" : "bg-emerald-900/10 border-l-4 border-emerald-700";
                  else if (isActiveEvent && item.hasPriceDrop) bgClass = "animate-pulse-blue bg-blue-900/20 border-l-4 border-blue-500";
-
                  return (
                    <div key={item.id} className={`p-4 flex flex-col md:flex-row items-center gap-4 ${bgClass}`}>
                       <div className="flex-1 text-center md:text-left w-full md:w-auto">
-                         <div className="font-bold text-white">{item.name}</div>
+                         <div className="font-bold text-white flex items-center justify-center md:justify-start gap-2">
+                           {item.isPinned && <Pin size={14} className="text-blue-500 fill-blue-500" />}
+                           {item.name}
+                         </div>
                          <div className="flex items-center justify-center md:justify-start gap-2 mt-1">
                             {item.status === 'LOADING' && <span className="text-[10px] text-blue-400 animate-pulse">Verificando...</span>}
                             {item.status === 'ERRO' && <span className="text-[10px] text-red-400">{item.message || 'Erro'}</span>}
                             <span className="text-[10px] text-slate-500 flex items-center gap-1"><Clock size={10}/> {item.lastUpdated ? new Date(item.lastUpdated).toLocaleTimeString().slice(0,5) : '--:--'}</span>
                          </div>
                       </div>
-                      
-                      {/* CONTAINER DE PREÇOS + BOTÃO OLHO */}
-                      {/* Mobile: relative + justify-center (para centralizar preços) */}
-                      {/* Desktop: justify-end (para alinhar a direita) */}
                       <div className="w-full md:w-auto flex items-center justify-center md:justify-end relative min-h-[50px]">
-                          
-                          {/* BOTÃO "OLHO" - Absoluto na esquerda no mobile */}
                           {isActiveEvent && (
                                <div className="absolute left-0 md:static md:mr-6 flex items-center">
-                                   <button 
-                                     onClick={() => acknowledgeItem(item.id)} 
-                                     className="text-emerald-500 hover:text-emerald-300 hover:bg-emerald-500/20 p-2 rounded-full transition-all"
-                                     title="Marcar como visto"
-                                   >
-                                      <Eye size={20}/>
-                                   </button>
+                                   <button onClick={() => acknowledgeItem(item.id)} className="text-emerald-500 hover:text-emerald-300 hover:bg-emerald-500/20 p-2 rounded-full transition-all" title="Marcar como visto"><Eye size={20}/></button>
                                </div>
                           )}
-
-                          {/* BLOCO DE PREÇOS - Centralizado no Mobile via flex do pai */}
                           <div className="flex items-center justify-center gap-6">
                               <div className="text-center w-24">
                                  <div className="text-[10px] text-slate-500 font-bold tracking-wider">ALVO</div>
                                  <div className="font-mono text-slate-400">{formatMoney(item.targetPrice)}</div>
                               </div>
-                              
                               <div className="h-8 w-px bg-slate-700/50"></div>
-
                               <div className="text-center w-28">
                                  <div className="text-[10px] text-slate-500 font-bold tracking-wider">ATUAL</div>
-                                 <div className={`font-mono text-lg font-bold ${isDeal ? 'text-emerald-400' : 'text-slate-200'}`}>
-                                   {formatMoney(item.lastPrice)}
-                                 </div>
+                                 <div className={`font-mono text-lg font-bold ${isDeal ? 'text-emerald-400' : 'text-slate-200'}`}>{formatMoney(item.lastPrice)}</div>
                               </div>
                           </div>
                       </div>
-
                       <div className="flex gap-2 w-full md:w-auto justify-center border-t border-slate-800 pt-2 md:pt-0 md:border-0 md:ml-4">
+                         <button title={item.isPinned ? "Desafixar" : "Fixar no Topo"} onClick={() => togglePin(item.id)} className={`p-2 transition-colors ${item.isPinned ? 'text-blue-500' : 'text-slate-500 hover:text-blue-400'}`}><Pin size={16} className={item.isPinned ? "fill-blue-500" : ""} /></button>
                          <button title="Forçar Atualização" onClick={() => resetItem(item.id)} className="text-slate-500 hover:text-emerald-400 p-2"><RefreshCw size={16}/></button>
                          <button onClick={() => { setEditingItem(item); setEditingTargetInput(formatMoney(item.targetPrice).replace('z','').trim()); }} className="text-slate-500 hover:text-blue-400 p-2"><Edit2 size={16}/></button>
                          <button onClick={() => removeItem(item.id)} className="text-slate-500 hover:text-red-400 p-2"><Trash2 size={16}/></button>
