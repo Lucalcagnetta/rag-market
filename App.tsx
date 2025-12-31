@@ -67,38 +67,28 @@ const App: React.FC = () => {
       const ctx = audioCtxRef.current;
       if (!ctx) return;
       const now = ctx.currentTime;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const merger = ctx.createChannelMerger(2);
-      osc.connect(gain);
-      gain.connect(merger, 0, 0); 
-      gain.connect(merger, 0, 1);
-      merger.connect(ctx.destination);
       
+      const createOsc = (freq: number, startTime: number, duration: number, wave: OscillatorType = 'sine') => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = wave;
+        osc.frequency.setValueAtTime(freq, startTime);
+        gain.gain.setValueAtTime(volume, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(startTime);
+        osc.stop(startTime + duration);
+      };
+
       if (type === 'deal') {
-        osc.type = 'square';
-        osc.frequency.setValueAtTime(523.25, now);
-        osc.frequency.setValueAtTime(1046.50, now + 0.15);
-        gain.gain.setValueAtTime(volume, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
-        osc.start(now);
-        osc.stop(now + 0.6);
+        createOsc(523.25, now, 0.2, 'square');
+        createOsc(1046.50, now + 0.1, 0.4, 'square');
       } else if (type === 'competition') {
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(440, now);
-        osc.frequency.setValueAtTime(330, now + 0.1);
-        gain.gain.setValueAtTime(volume * 0.8, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
-        osc.start(now);
-        osc.stop(now + 0.4);
+        createOsc(330, now, 0.15, 'sawtooth');
+        createOsc(330, now + 0.2, 0.3, 'sawtooth');
       } else {
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(880, now);
-        osc.frequency.exponentialRampToValueAtTime(440, now + 0.3);
-        gain.gain.setValueAtTime(volume, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
-        osc.start(now);
-        osc.stop(now + 0.3);
+        createOsc(880, now, 0.3, 'triangle');
       }
     } catch (e) { console.error(e); }
   }, [initAudio, volume]);
@@ -158,6 +148,7 @@ const App: React.FC = () => {
             const isDeal = newItem.lastPrice && newItem.lastPrice <= newItem.targetPrice;
             const isCompAlert = newItem.isUserPrice && newItem.lastPrice !== null && newItem.lastPrice !== newItem.userKnownPrice;
             
+            // Prioridade Verde sobre Vermelho no toque
             if (isDeal) playSound('deal');
             else if (isCompAlert) playSound('competition');
             else if (newItem.hasPriceDrop) playSound('drop');
@@ -245,12 +236,13 @@ const App: React.FC = () => {
     initAudio();
     const newList = items.map(i => {
       if (i.id === id) {
-        const isTurningOn = !i.isUserPrice;
+        const isRemoving = i.isUserPrice && i.lastPrice === i.userKnownPrice;
+        if (isRemoving) return { ...i, isUserPrice: false, userKnownPrice: null };
         return { 
           ...i, 
-          isUserPrice: isTurningOn, 
-          userKnownPrice: isTurningOn ? i.lastPrice : null,
-          isAck: true // Reseta alerta ao marcar/desmarcar
+          isUserPrice: true, 
+          userKnownPrice: i.lastPrice,
+          isAck: true 
         };
       }
       return i;
@@ -287,25 +279,32 @@ const App: React.FC = () => {
   const sortedItems = [...items].sort((a, b) => {
       const aDeal = (a.lastPrice && a.lastPrice <= a.targetPrice) || a.hasPriceDrop;
       const bDeal = (b.lastPrice && b.lastPrice <= b.targetPrice) || b.hasPriceDrop;
-      const aCompAlert = a.isUserPrice && a.lastPrice !== null && a.lastPrice !== a.userKnownPrice;
-      const bCompAlert = b.isUserPrice && b.lastPrice !== null && b.lastPrice !== b.userKnownPrice;
       
-      const aActiveAlert = (aDeal || aCompAlert) && !a.isAck;
-      const bActiveAlert = (bDeal || bCompAlert) && !b.isAck;
+      const aCompAlert = a.isUserPrice && a.lastPrice !== null && a.lastPrice !== a.userKnownPrice && !aDeal;
+      const bCompAlert = b.isUserPrice && b.lastPrice !== null && b.lastPrice !== b.userKnownPrice && !bDeal;
+      
+      const aActiveGreen = aDeal && !a.isAck;
+      const bActiveGreen = bDeal && !b.isAck;
+      const aActiveRed = aCompAlert && !a.isAck;
+      const bActiveRed = bCompAlert && !b.isAck;
 
-      // 1. Alertas Ativos (Ofertas Verdes ou Competições Vermelhas não vistas)
-      if (aActiveAlert && !bActiveAlert) return -1;
-      if (!aActiveAlert && bActiveAlert) return 1;
+      // 1. Prioridade Absoluta: Verde Ativo (Novos Deals)
+      if (aActiveGreen && !bActiveGreen) return -1;
+      if (!aActiveGreen && bActiveGreen) return 1;
 
-      // 2. Itens Fixados (Pins)
+      // 2. Alerta Vermelho Ativo (Nova Concorrência)
+      if (aActiveRed && !bActiveRed) return -1;
+      if (!aActiveRed && bActiveRed) return 1;
+
+      // 3. Itens Fixados (Pins)
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
 
-      // 3. Alertas Vermelhos Reconhecidos (Piscando sob os pins)
+      // 4. Alertas Vermelhos Vistos (Piscando sob os pins)
       if (aCompAlert && !bCompAlert) return -1;
       if (!aCompAlert && bCompAlert) return 1;
 
-      // 4. Promoções já vistas
+      // 5. Promoções/Deals já vistos
       if (aDeal && !bDeal) return -1;
       if (!aDeal && bDeal) return 1;
 
@@ -332,7 +331,7 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [activeAlertsCount]);
 
-  if (!dataLoaded) return <div className="min-h-screen bg-[#0d1117] flex items-center justify-center text-slate-400"><Activity className="animate-spin mr-2"/> Carregando Nuvem...</div>;
+  if (!dataLoaded) return <div className="min-h-screen bg-[#0d1117] flex items-center justify-center text-slate-400 font-mono tracking-tighter"><Activity className="animate-spin mr-2 text-blue-500"/> Sincronizando Nuvem...</div>;
 
   return (
     <div className="min-h-screen bg-[#0d1117] text-slate-200 font-sans selection:bg-emerald-500/30">
@@ -353,10 +352,10 @@ const App: React.FC = () => {
 
         @keyframes pulse-red {
           0% { background-color: rgba(239, 68, 68, 0.05); border-color: rgba(239, 68, 68, 0.4); }
-          50% { background-color: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 1); box-shadow: 0 0 20px rgba(239, 68, 68, 0.4); }
+          50% { background-color: rgba(239, 68, 68, 0.25); border-color: rgba(239, 68, 68, 1); box-shadow: 0 0 20px rgba(239, 68, 68, 0.4); }
           100% { background-color: rgba(239, 68, 68, 0.05); border-color: rgba(239, 68, 68, 0.4); }
         }
-        .animate-pulse-red { animation: pulse-red 1.2s infinite; }
+        .animate-pulse-red { animation: pulse-red 1s infinite; }
 
         input[type=range] { -webkit-appearance: none; background: transparent; }
         input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 12px; width: 12px; border-radius: 50%; background: #3b82f6; margin-top: -4px; }
@@ -369,11 +368,11 @@ const App: React.FC = () => {
              <div className="hidden md:flex items-center gap-2">
                <div className="bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50 flex items-center gap-2 shadow-sm">
                  <div className={`w-2 h-2 rounded-full ${settings.isRunning ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-rose-500'}`}></div>
-                 <span className="text-xs font-medium text-slate-300 tracking-wide">{items.length} <span className="text-slate-500">monitors</span></span>
+                 <span className="text-xs font-medium text-slate-300 tracking-wide">{items.length} <span className="text-slate-500">itens</span></span>
                </div>
              </div>
              <button onClick={acknowledgeAll} disabled={activeAlertsCount === 0} className={`px-3 h-[36px] rounded-lg text-xs font-medium flex items-center gap-2 shadow-lg transition-all active:scale-95 ${activeAlertsCount > 0 ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/20' : 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700'}`}>
-                <ListChecks size={16} /><span className="hidden sm:inline">Marcar Visto</span>
+                <ListChecks size={16} /><span className="hidden sm:inline">Visto Geral</span>
                 <span className={`${activeAlertsCount > 0 ? 'bg-white/20 text-white' : 'bg-slate-700 text-slate-500'} px-1.5 rounded text-[10px] font-bold`}>{activeAlertsCount}</span>
              </button>
           </div>
@@ -420,52 +419,26 @@ const App: React.FC = () => {
       
       <main className="p-2 md:p-8 max-w-6xl mx-auto">
         {settings.isRunning && isNightPause && !settings.ignoreNightPause && (
-          <div className="mb-4 bg-yellow-900/20 border border-yellow-700/50 text-yellow-500 p-2 rounded text-center text-xs flex items-center justify-center gap-2"><Moon size={14} /> Pausa Noturna Automática</div>
-        )}
-
-        {showSettings && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-             <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-lg w-full max-w-lg">
-                <h3 className="font-bold mb-4">Configurações do Servidor</h3>
-                <textarea className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm font-mono text-slate-300 h-24 mb-4" placeholder="Cookie..." value={tempSettings.cookie} onChange={e => setTempSettings({...tempSettings, cookie: e.target.value})} />
-                <div className="flex justify-end gap-2">
-                   <button onClick={() => setShowSettings(false)} className="text-slate-400 px-4 py-2">Cancelar</button>
-                   <button onClick={handleSaveSettings} className="bg-blue-600 text-white px-4 py-2 rounded">Salvar</button>
-                </div>
-             </div>
-          </div>
-        )}
-
-        {editingItem && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-             <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-lg w-full max-w-sm shadow-2xl">
-                <h3 className="font-bold mb-4 flex gap-2"><Edit2 size={16}/> Editar Item</h3>
-                <input className="w-full bg-slate-950 border border-slate-700 p-2 rounded text-white mb-3" value={editingItem.name} onChange={e => setEditingItem({...editingItem, name: e.target.value})} />
-                <input className="w-full bg-slate-950 border border-slate-700 p-2 rounded text-white mb-4" value={editingTargetInput} onChange={e => { setEditingTargetInput(e.target.value); setEditingItem({...editingItem, targetPrice: parseKkInput(e.target.value)}); }} />
-                <div className="flex justify-end gap-2">
-                  <button onClick={() => setEditingItem(null)} className="text-slate-400 px-3">Cancelar</button>
-                  <button onClick={saveEdit} className="bg-blue-600 text-white px-4 py-2 rounded">Salvar</button>
-                </div>
-             </div>
-          </div>
+          <div className="mb-4 bg-yellow-900/20 border border-yellow-700/50 text-yellow-500 p-2 rounded text-center text-xs flex items-center justify-center gap-2"><Moon size={14} /> Pausa Noturna de Varredura (01h-08h)</div>
         )}
 
         <div className="bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden shadow-2xl">
            <div className="p-4 bg-[#0d1117] border-b border-[#30363d]">
                <div className={`${isAddExpanded ? 'flex' : 'hidden'} md:flex flex-col md:flex-row gap-2`}>
-                  <input className="flex-1 bg-[#161b22] border border-[#30363d] p-2 rounded text-sm text-white" placeholder="Nome..." value={newItemName} onChange={e => setNewItemName(e.target.value)}/>
-                  <input className="w-full md:w-32 bg-[#161b22] border border-[#30363d] p-2 rounded text-sm text-white" placeholder="Preço (ex: 30kk)" value={newItemTarget} onChange={e => setNewItemTarget(e.target.value)}/>
-                  <button onClick={addNewItem} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold flex items-center justify-center gap-1"><Plus size={16}/> ADD</button>
+                  <input className="flex-1 bg-[#161b22] border border-[#30363d] p-2 rounded text-sm text-white" placeholder="Nome do Item..." value={newItemName} onChange={e => setNewItemName(e.target.value)}/>
+                  <input className="w-full md:w-32 bg-[#161b22] border border-[#30363d] p-2 rounded text-sm text-white" placeholder="Alvo (ex: 30kk)" value={newItemTarget} onChange={e => setNewItemTarget(e.target.value)}/>
+                  <button onClick={addNewItem} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold flex items-center justify-center gap-1 shadow-lg shadow-blue-900/20"><Plus size={16}/> ADICIONAR</button>
                </div>
                <div className="md:hidden mt-2">
-                   <button onClick={() => setIsAddExpanded(!isAddExpanded)} className="text-slate-500 text-xs w-full py-1">{isAddExpanded ? 'Recolher' : 'Novo Item'}</button>
+                   <button onClick={() => setIsAddExpanded(!isAddExpanded)} className="text-slate-500 text-xs w-full py-2 font-bold tracking-widest">{isAddExpanded ? 'RECOLHER PAINEL' : 'NOVO MONITORAMENTO'}</button>
                </div>
            </div>
            
            <div className="divide-y divide-[#30363d]">
               {sortedItems.map(item => {
                  const isDeal = item.lastPrice && item.lastPrice > 0 && item.lastPrice <= item.targetPrice;
-                 const isCompAlert = item.isUserPrice && item.lastPrice !== null && item.lastPrice !== item.userKnownPrice;
+                 // Alerta vermelho só existe se NÃO for um Alerta verde (prioridade verde)
+                 const isCompAlert = item.isUserPrice && item.lastPrice !== null && item.lastPrice !== item.userKnownPrice && !isDeal;
                  const isAck = item.isAck;
 
                  let bgClass = "bg-[#161b22]";
@@ -474,51 +447,85 @@ const App: React.FC = () => {
                  else if (!isAck && item.hasPriceDrop) bgClass = "animate-pulse-blue bg-blue-900/20 border-l-4 border-blue-500";
 
                  return (
-                   <div key={item.id} className={`p-4 flex flex-col md:flex-row items-center gap-4 ${bgClass}`}>
+                   <div key={item.id} className={`p-4 flex flex-col md:flex-row items-center gap-4 transition-colors ${bgClass}`}>
                       <div className="flex-1 text-center md:text-left w-full">
                          <div className="font-bold text-white flex items-center justify-center md:justify-start gap-2">
-                           {item.isPinned && <Pin size={14} className="text-blue-500 fill-blue-500" />}
-                           {item.isUserPrice && <ThumbsUp size={14} className="text-blue-400 fill-blue-400" />}
+                           {item.isPinned && <Pin size={14} className="text-blue-500 fill-blue-500 drop-shadow-[0_0_3px_rgba(59,130,246,0.5)]" />}
+                           {item.isUserPrice && <ThumbsUp size={14} className={`${isCompAlert ? 'text-rose-500 fill-rose-500' : 'text-blue-400 fill-blue-400'}`} />}
                            {item.name}
                          </div>
                          <div className="flex items-center justify-center md:justify-start gap-2 mt-1">
-                            {item.status === 'LOADING' && <span className="text-[10px] text-blue-400 animate-pulse">Buscando...</span>}
-                            <span className="text-[10px] text-slate-500 flex items-center gap-1"><Clock size={10}/> {item.lastUpdated ? new Date(item.lastUpdated).toLocaleTimeString().slice(0,5) : '--:--'}</span>
+                            {item.status === 'LOADING' && <span className="text-[10px] text-blue-400 animate-pulse font-mono uppercase tracking-tighter">Buscando na GNJOY...</span>}
+                            <span className="text-[10px] text-slate-500 flex items-center gap-1 font-mono"><Clock size={10}/> {item.lastUpdated ? new Date(item.lastUpdated).toLocaleTimeString().slice(0,5) : '--:--'}</span>
                          </div>
                       </div>
 
                       <div className="w-full md:w-auto flex items-center justify-center md:justify-end relative min-h-[50px]">
                           {((isDeal || isCompAlert || item.hasPriceDrop) && !isAck) && (
                                <div className="absolute left-0 md:static md:mr-6">
-                                   <button onClick={() => acknowledgeItem(item.id)} className="text-emerald-500 hover:bg-emerald-500/10 p-2 rounded-full"><Eye size={20}/></button>
+                                   <button onClick={() => acknowledgeItem(item.id)} className="text-emerald-500 hover:bg-emerald-500/10 p-2 rounded-full transition-all" title="Ver Alerta"><Eye size={22}/></button>
                                </div>
                           )}
                           <div className="flex items-center justify-center gap-6">
                               <div className="text-center w-24">
-                                 <div className="text-[10px] text-slate-500 font-bold uppercase">Alvo</div>
-                                 <div className="font-mono text-slate-400">{formatMoney(item.targetPrice)}</div>
+                                 <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1 opacity-50">Alvo</div>
+                                 <div className="font-mono text-xs text-slate-400">{formatMoney(item.targetPrice)}</div>
                               </div>
                               <div className="h-8 w-px bg-slate-700/50"></div>
                               <div className="text-center w-28">
-                                 <div className="text-[10px] text-slate-500 font-bold uppercase">Atual</div>
+                                 <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1 opacity-50">Atual</div>
                                  <div className={`font-mono text-lg font-bold ${isDeal ? 'text-emerald-400' : isCompAlert ? 'text-rose-400' : 'text-slate-200'}`}>{formatMoney(item.lastPrice)}</div>
                               </div>
                           </div>
                       </div>
 
                       <div className="flex gap-2 w-full md:w-auto justify-center md:ml-4 border-t border-slate-800 md:border-0 pt-2 md:pt-0">
-                         <button title="É meu preço (Joia)" onClick={() => toggleUserPrice(item.id)} className={`p-2 transition-colors ${item.isUserPrice ? 'text-blue-400' : 'text-slate-500 hover:text-blue-300'}`}><ThumbsUp size={16} className={item.isUserPrice ? "fill-blue-400" : ""} /></button>
-                         <button title="Fixar" onClick={() => togglePin(item.id)} className={`p-2 transition-colors ${item.isPinned ? 'text-blue-500' : 'text-slate-500 hover:text-blue-400'}`}><Pin size={16} className={item.isPinned ? "fill-blue-500" : ""} /></button>
-                         <button title="Forçar" onClick={() => resetItem(item.id)} className="text-slate-500 hover:text-emerald-400 p-2"><RefreshCw size={16}/></button>
-                         <button onClick={() => { setEditingItem(item); setEditingTargetInput(formatMoney(item.targetPrice).replace('z','').trim()); }} className="text-slate-500 hover:text-blue-400 p-2"><Edit2 size={16}/></button>
-                         <button onClick={() => removeItem(item.id)} className="text-slate-500 hover:text-red-400 p-2"><Trash2 size={16}/></button>
+                         <button title={isCompAlert ? "Atualizar meu preço" : "Marcar como meu preço"} onClick={() => toggleUserPrice(item.id)} className={`p-2 transition-all active:scale-90 ${item.isUserPrice ? (isCompAlert ? 'text-rose-500' : 'text-blue-400') : 'text-slate-500 hover:text-blue-300'}`}><ThumbsUp size={18} className={item.isUserPrice ? (isCompAlert ? "fill-rose-500" : "fill-blue-400") : ""} /></button>
+                         <button title="Fixar no Topo" onClick={() => togglePin(item.id)} className={`p-2 transition-all active:scale-90 ${item.isPinned ? 'text-blue-500' : 'text-slate-500 hover:text-blue-400'}`}><Pin size={18} className={item.isPinned ? "fill-blue-500" : ""} /></button>
+                         <button title="Forçar Busca" onClick={() => resetItem(item.id)} className="text-slate-500 hover:text-emerald-400 p-2 transition-all"><RefreshCw size={18}/></button>
+                         <button title="Editar" onClick={() => { setEditingItem(item); setEditingTargetInput(formatMoney(item.targetPrice).replace('z','').trim()); }} className="text-slate-500 hover:text-blue-400 p-2"><Edit2 size={18}/></button>
+                         <button title="Excluir" onClick={() => removeItem(item.id)} className="text-slate-500 hover:text-red-400 p-2"><Trash2 size={18}/></button>
                       </div>
                    </div>
                  );
               })}
+              {items.length === 0 && <div className="p-12 text-center text-slate-500 font-mono text-sm">LISTA DE MONITORAMENTO VAZIA</div>}
            </div>
         </div>
       </main>
+
+      {/* Modais */}
+      {showSettings && (
+          <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+             <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-lg w-full max-w-lg shadow-2xl">
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="font-bold flex items-center gap-2 text-blue-400"><SettingsIcon size={18}/> SERVIDOR LOCAL</h3>
+                    <button onClick={() => setShowSettings(false)} className="text-slate-500 hover:text-white"><X size={20}/></button>
+                </div>
+                <textarea className="w-full bg-slate-950 border border-slate-700 rounded p-3 text-xs font-mono text-slate-300 h-32 mb-6 focus:border-blue-500 outline-none transition-all" placeholder="Cookie..." value={tempSettings.cookie} onChange={e => setTempSettings({...tempSettings, cookie: e.target.value})} />
+                <div className="flex justify-end gap-3">
+                   <button onClick={() => setShowSettings(false)} className="text-slate-400 px-4 py-2 text-sm hover:text-white transition-all">DESCARTAR</button>
+                   <button onClick={handleSaveSettings} className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-bold shadow-lg shadow-blue-900/30 transition-all">SALVAR NA NUVEM</button>
+                </div>
+             </div>
+          </div>
+      )}
+
+      {editingItem && (
+          <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+             <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-lg w-full max-w-sm shadow-2xl">
+                <h3 className="font-bold mb-6 flex items-center gap-2 text-blue-400"><Edit2 size={18}/> AJUSTAR MONITOR</h3>
+                <div className="space-y-4">
+                    <input className="w-full bg-slate-950 border border-slate-700 p-3 rounded-lg text-white font-medium" value={editingItem.name} onChange={e => setEditingItem({...editingItem, name: e.target.value})} />
+                    <input className="w-full bg-slate-950 border border-slate-700 p-3 rounded-lg text-white font-mono" value={editingTargetInput} onChange={e => { setEditingTargetInput(e.target.value); setEditingItem({...editingItem, targetPrice: parseKkInput(e.target.value)}); }} />
+                </div>
+                <div className="flex justify-end gap-3 mt-8">
+                  <button onClick={() => setEditingItem(null)} className="text-slate-400 px-4 py-2 text-sm hover:text-white">CANCELAR</button>
+                  <button onClick={saveEdit} className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-bold shadow-lg shadow-blue-900/30">CONFIRMAR</button>
+                </div>
+             </div>
+          </div>
+      )}
     </div>
   );
 };
