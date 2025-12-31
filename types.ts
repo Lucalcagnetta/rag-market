@@ -10,23 +10,25 @@ export enum Status {
 export interface Item {
   id: string;
   name: string;
-  targetPrice: number; // New field for "Preço Alvo"
+  targetPrice: number;
   lastPrice: number | null;
-  lastUpdated: string | null; // ISO Date string
+  lastUpdated: string | null;
   status: Status;
   message?: string;
-  nextUpdate: number; // Timestamp for next scheduled check
-  isAck?: boolean; // Se o usuário já "viu" a oferta/evento atual
-  hasPriceDrop?: boolean; // Se o preço caiu na última atualização
-  isPinned?: boolean; // Se o item está fixado no topo
+  nextUpdate: number;
+  isAck?: boolean;
+  hasPriceDrop?: boolean;
+  isPinned?: boolean;
+  isUserPrice?: boolean;      // Se o usuário marcou o preço como dele
+  userKnownPrice?: number | null; // O preço que o usuário marcou como dele
 }
 
 export interface Settings {
   cookie: string;
   useProxy: boolean;
   proxyUrl: string;
-  isRunning: boolean; // Controle Global da Automação
-  ignoreNightPause?: boolean; // Se true, roda 24h ignorando o horário 01-08h
+  isRunning: boolean;
+  ignoreNightPause?: boolean;
 }
 
 export interface ScrapeResult {
