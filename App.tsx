@@ -307,21 +307,19 @@ const App: React.FC = () => {
       const aActiveRed = aCompAlert && !a.isAck;
       const bActiveRed = bCompAlert && !b.isAck;
 
+      // 1. Alertas Verdes Ativos (Oportunidade)
       if (aActiveGreen && !bActiveGreen) return -1;
       if (!aActiveGreen && bActiveGreen) return 1;
 
+      // 2. Alertas Vermelhos Ativos (Competição)
       if (aActiveRed && !bActiveRed) return -1;
       if (!aActiveRed && bActiveRed) return 1;
 
+      // 3. Fixados
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
 
-      if (aCompAlert && !bCompAlert) return -1;
-      if (!aCompAlert && bCompAlert) return 1;
-
-      if (aDeal && !bDeal) return -1;
-      if (!aDeal && bDeal) return 1;
-
+      // 4. Ordem Alfabética (Joia sem alerta ativo cai aqui agora)
       return a.name.localeCompare(b.name);
   });
 
@@ -478,9 +476,6 @@ const App: React.FC = () => {
                               {((isDeal || item.hasPriceDrop) && !isAck) && (
                                    <button onClick={() => acknowledgeItem(item.id)} className="text-emerald-500 hover:bg-emerald-500/10 p-2 rounded-full transition-all" title="Marcar Promoção como Visto"><Eye size={22}/></button>
                               )}
-                              {(isCompAlert) && (
-                                   <button onClick={() => confirmNewUserPrice(item.id)} className="text-blue-400 hover:bg-blue-400/10 p-2 rounded-full transition-all border border-blue-400/30 bg-blue-950/30" title="Esse é meu novo preço"><Check size={22}/></button>
-                              )}
                           </div>
                           <div className="flex items-center justify-center gap-6">
                               <div className="text-center w-24">
@@ -496,6 +491,9 @@ const App: React.FC = () => {
                       </div>
 
                       <div className="flex gap-2 w-full md:w-auto justify-center md:ml-4 border-t border-slate-800 md:border-0 pt-2 md:pt-0">
+                         {isCompAlert && (
+                            <button onClick={() => confirmNewUserPrice(item.id)} className="p-2 text-blue-400 animate-pulse bg-blue-400/10 rounded-lg border border-blue-400/30 transition-all hover:bg-blue-400/20" title="Confirmar meu novo preço"><Check size={20}/></button>
+                         )}
                          <button title={isCompAlert ? "Atualizar meu preço" : "Marcar como meu preço"} onClick={() => toggleUserPrice(item.id)} className={`p-2 transition-all active:scale-90 ${item.isUserPrice ? (isCompAlert ? 'text-rose-500' : 'text-blue-400') : 'text-slate-500 hover:text-blue-300'}`}><ThumbsUp size={18} className={item.isUserPrice ? (isCompAlert ? "fill-rose-500" : "fill-blue-400") : ""} /></button>
                          <button title="Fixar no Topo" onClick={() => togglePin(item.id)} className={`p-2 transition-all active:scale-90 ${item.isPinned ? 'text-blue-500' : 'text-slate-500 hover:text-blue-400'}`}><Pin size={18} className={item.isPinned ? "fill-blue-500" : ""} /></button>
                          <button title="Forçar Busca" onClick={() => resetItem(item.id)} className="text-slate-500 hover:text-emerald-400 p-2 transition-all"><RefreshCw size={18}/></button>
