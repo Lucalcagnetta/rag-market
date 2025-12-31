@@ -18,7 +18,8 @@ import {
   ChevronUp,
   X,
   Pin,
-  ThumbsUp
+  ThumbsUp,
+  Check
 } from 'lucide-react';
 
 const SYNC_INTERVAL_MS = 2000;
@@ -148,7 +149,6 @@ const App: React.FC = () => {
             const isDeal = newItem.lastPrice && newItem.lastPrice <= newItem.targetPrice;
             const isCompAlert = newItem.isUserPrice && newItem.lastPrice !== null && newItem.lastPrice !== newItem.userKnownPrice;
             
-            // Prioridade Verde sobre Vermelho no toque
             if (isDeal) playSound('deal');
             else if (isCompAlert) playSound('competition');
             else if (newItem.hasPriceDrop) playSound('drop');
@@ -251,6 +251,25 @@ const App: React.FC = () => {
     saveData(newList, settings);
   };
 
+  const confirmNewUserPrice = (id: string) => {
+    initAudio();
+    const newList = items.map(i => {
+      if (i.id === id && i.lastPrice !== null) {
+        return { 
+          ...i, 
+          userKnownPrice: i.lastPrice,
+          isAck: true,
+          hasPriceDrop: false
+        };
+      }
+      return i;
+    });
+    setItems(newList);
+    saveData(newList, settings);
+    pendingAcksRef.current.add(id);
+    fetch(`/api/ack/${id}`, { method: 'POST' }).catch(console.error);
+  };
+
   const acknowledgeAll = async () => {
     if (activeAlertsCount === 0) return;
     if (confirm("Marcar tudo como visto?")) {
@@ -288,23 +307,18 @@ const App: React.FC = () => {
       const aActiveRed = aCompAlert && !a.isAck;
       const bActiveRed = bCompAlert && !b.isAck;
 
-      // 1. Prioridade Absoluta: Verde Ativo (Novos Deals)
       if (aActiveGreen && !bActiveGreen) return -1;
       if (!aActiveGreen && bActiveGreen) return 1;
 
-      // 2. Alerta Vermelho Ativo (Nova Concorrência)
       if (aActiveRed && !bActiveRed) return -1;
       if (!aActiveRed && bActiveRed) return 1;
 
-      // 3. Itens Fixados (Pins)
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
 
-      // 4. Alertas Vermelhos Vistos (Piscando sob os pins)
       if (aCompAlert && !bCompAlert) return -1;
       if (!aCompAlert && bCompAlert) return 1;
 
-      // 5. Promoções/Deals já vistos
       if (aDeal && !bDeal) return -1;
       if (!aDeal && bDeal) return 1;
 
@@ -437,7 +451,6 @@ const App: React.FC = () => {
            <div className="divide-y divide-[#30363d]">
               {sortedItems.map(item => {
                  const isDeal = item.lastPrice && item.lastPrice > 0 && item.lastPrice <= item.targetPrice;
-                 // Alerta vermelho só existe se NÃO for um Alerta verde (prioridade verde)
                  const isCompAlert = item.isUserPrice && item.lastPrice !== null && item.lastPrice !== item.userKnownPrice && !isDeal;
                  const isAck = item.isAck;
 
@@ -461,11 +474,14 @@ const App: React.FC = () => {
                       </div>
 
                       <div className="w-full md:w-auto flex items-center justify-center md:justify-end relative min-h-[50px]">
-                          {((isDeal || isCompAlert || item.hasPriceDrop) && !isAck) && (
-                               <div className="absolute left-0 md:static md:mr-6">
-                                   <button onClick={() => acknowledgeItem(item.id)} className="text-emerald-500 hover:bg-emerald-500/10 p-2 rounded-full transition-all" title="Ver Alerta"><Eye size={22}/></button>
-                               </div>
-                          )}
+                          <div className="absolute left-0 md:static md:mr-6 flex gap-2">
+                              {((isDeal || item.hasPriceDrop) && !isAck) && (
+                                   <button onClick={() => acknowledgeItem(item.id)} className="text-emerald-500 hover:bg-emerald-500/10 p-2 rounded-full transition-all" title="Marcar Promoção como Visto"><Eye size={22}/></button>
+                              )}
+                              {(isCompAlert) && (
+                                   <button onClick={() => confirmNewUserPrice(item.id)} className="text-blue-400 hover:bg-blue-400/10 p-2 rounded-full transition-all border border-blue-400/30 bg-blue-950/30" title="Esse é meu novo preço"><Check size={22}/></button>
+                              )}
+                          </div>
                           <div className="flex items-center justify-center gap-6">
                               <div className="text-center w-24">
                                  <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1 opacity-50">Alvo</div>
@@ -494,7 +510,6 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {/* Modais */}
       {showSettings && (
           <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
              <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-lg w-full max-w-lg shadow-2xl">
