@@ -35,7 +35,7 @@ const App: React.FC = () => {
     return saved !== null ? parseFloat(saved) : 0.5;
   });
 
-  // --- ESTADOS DA CALCULADORA ---
+  // --- CALCULADORA ---
   const [calcPrice, setCalcPrice] = useState(() => localStorage.getItem('ro_calc_price') || '0,85');
   const [calcQty, setCalcQty] = useState('1');
   const [calcTotal, setCalcTotal] = useState('');
@@ -53,14 +53,12 @@ const App: React.FC = () => {
   const previousItemsRef = useRef<Item[]>([]); 
   const pendingAcksRef = useRef<Set<string>>(new Set());
 
-  // --- LÓGICA DA CALCULADORA (SINCRONIZAÇÃO) ---
+  // --- LÓGICA DA CALCULADORA ---
   useEffect(() => {
     if (isCalculatingRef.current) return;
     isCalculatingRef.current = true;
-    
     const p = parseFloat(calcPrice.replace(',', '.'));
     const q = parseFloat(calcQty.replace(',', '.'));
-    
     if (!isNaN(p) && !isNaN(q)) {
       const total = (p * q).toFixed(2).replace('.', ',');
       setCalcTotal(total);
@@ -73,10 +71,8 @@ const App: React.FC = () => {
     setCalcTotal(val);
     if (isCalculatingRef.current) return;
     isCalculatingRef.current = true;
-    
     const p = parseFloat(calcPrice.replace(',', '.'));
     const t = parseFloat(val.replace(',', '.'));
-    
     if (!isNaN(p) && p > 0 && !isNaN(t)) {
       setCalcQty(Math.floor(t / p).toString());
     }
@@ -135,9 +131,7 @@ const App: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: currentItems, settings: currentSettings })
       });
-    } catch (err) {
-      console.error("Failed to save", err);
-    }
+    } catch (err) { console.error("Failed to save", err); }
   }, []);
 
   useEffect(() => {
@@ -168,20 +162,31 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [editingItem, dataLoaded]);
 
+  // --- LÓGICA DE SOM CORRIGIDA ---
   useEffect(() => {
     if (!dataLoaded) return;
     const prevItems = previousItemsRef.current;
+    
     items.forEach(newItem => {
         const oldItem = prevItems.find(p => p.id === newItem.id);
         const isPendingAck = pendingAcksRef.current.has(newItem.id);
         
-        if (!newItem.isAck && !isPendingAck && (oldItem?.isAck !== false)) {
-            const isDeal = newItem.lastPrice && newItem.lastPrice <= newItem.targetPrice;
+        // Se o item não está em modo de "visto pendente"
+        if (!newItem.isAck && !isPendingAck) {
+            const isDeal = newItem.lastPrice && newItem.lastPrice > 0 && newItem.lastPrice <= newItem.targetPrice;
             const isCompAlert = newItem.isUserPrice && newItem.lastPrice !== null && newItem.lastPrice !== newItem.userKnownPrice;
             
-            if (isDeal) playSound('deal');
-            else if (isCompAlert) playSound('competition');
-            else if (newItem.hasPriceDrop) playSound('drop');
+            // CONDIÇÃO DE SOM:
+            // 1. Mudou de visto para não visto (isAck trocou)
+            // 2. OU o preço mudou enquanto ainda estava não visto (queda consecutiva)
+            const statusChanged = oldItem?.isAck !== false;
+            const priceChanged = oldItem && oldItem.lastPrice !== newItem.lastPrice && newItem.lastPrice !== null;
+
+            if (statusChanged || priceChanged) {
+                if (isDeal) playSound('deal');
+                else if (isCompAlert) playSound('competition');
+                else if (newItem.hasPriceDrop) playSound('drop');
+            }
         }
     });
     previousItemsRef.current = items;
@@ -268,12 +273,7 @@ const App: React.FC = () => {
       if (i.id === id) {
         const isRemoving = i.isUserPrice && i.lastPrice === i.userKnownPrice;
         if (isRemoving) return { ...i, isUserPrice: false, userKnownPrice: null };
-        return { 
-          ...i, 
-          isUserPrice: true, 
-          userKnownPrice: i.lastPrice,
-          isAck: true 
-        };
+        return { ...i, isUserPrice: true, userKnownPrice: i.lastPrice, isAck: true };
       }
       return i;
     });
@@ -285,12 +285,7 @@ const App: React.FC = () => {
     initAudio();
     const newList = items.map(i => {
       if (i.id === id && i.lastPrice !== null) {
-        return { 
-          ...i, 
-          userKnownPrice: i.lastPrice,
-          isAck: true,
-          hasPriceDrop: false
-        };
+        return { ...i, userKnownPrice: i.lastPrice, isAck: true, hasPriceDrop: false };
       }
       return i;
     });
@@ -326,9 +321,8 @@ const App: React.FC = () => {
   };
 
   const sortedItems = [...items].sort((a, b) => {
-      const aDeal = (a.lastPrice && a.lastPrice <= a.targetPrice) || a.hasPriceDrop;
-      const bDeal = (b.lastPrice && b.lastPrice <= b.targetPrice) || b.hasPriceDrop;
-      
+      const aDeal = (a.lastPrice && a.lastPrice > 0 && a.lastPrice <= a.targetPrice) || a.hasPriceDrop;
+      const bDeal = (b.lastPrice && b.lastPrice > 0 && b.lastPrice <= b.targetPrice) || b.hasPriceDrop;
       const aCompAlert = a.isUserPrice && a.lastPrice !== null && a.lastPrice !== a.userKnownPrice && !aDeal;
       const bCompAlert = b.isUserPrice && b.lastPrice !== null && b.lastPrice !== b.userKnownPrice && !bDeal;
       
@@ -337,12 +331,24 @@ const App: React.FC = () => {
       const aActiveRed = aCompAlert && !a.isAck;
       const bActiveRed = bCompAlert && !b.isAck;
 
+      // PRIORIDADE 1: Novos Negócios (Verde Unseen)
       if (aActiveGreen && !bActiveGreen) return -1;
       if (!aActiveGreen && bActiveGreen) return 1;
+
+      // PRIORIDADE 2: Novas Competições (Vermelho Unseen)
       if (aActiveRed && !bActiveRed) return -1;
       if (!aActiveRed && bActiveRed) return 1;
+
+      // PRIORIDADE 3: Fixados
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
+
+      // PRIORIDADE 4: Alertas Vistos (pra não sumirem da vista geral, mas ficarem abaixo dos novos)
+      const aAnyAlert = aDeal || aCompAlert;
+      const bAnyAlert = bDeal || bCompAlert;
+      if (aAnyAlert && !bAnyAlert) return -1;
+      if (!aAnyAlert && bAnyAlert) return 1;
+
       return a.name.localeCompare(b.name);
   });
 
@@ -359,12 +365,10 @@ const App: React.FC = () => {
     : sortedItems;
 
   const activeAlertsCount = items.filter(i => {
-    const isDeal = (i.lastPrice && i.lastPrice <= i.targetPrice) || i.hasPriceDrop;
+    const isDeal = (i.lastPrice && i.lastPrice > 0 && i.lastPrice <= i.targetPrice) || i.hasPriceDrop;
     const isComp = i.isUserPrice && i.lastPrice !== null && i.lastPrice !== i.userKnownPrice;
     return (isDeal || isComp) && !i.isAck;
   }).length;
-
-  const isNightPause = new Date().getHours() >= 1 && new Date().getHours() < 8;
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
@@ -378,7 +382,7 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [activeAlertsCount]);
 
-  if (!dataLoaded) return <div className="min-h-screen bg-[#0d1117] flex items-center justify-center text-slate-400 font-mono tracking-tighter"><Activity className="animate-spin mr-2 text-blue-500"/> Sincronizando Nuvem...</div>;
+  if (!dataLoaded) return <div className="min-h-screen bg-[#0d1117] flex items-center justify-center text-slate-400 font-mono tracking-tighter"><Activity className="animate-spin mr-2 text-blue-500"/> Sincronizando...</div>;
 
   return (
     <div className="min-h-screen bg-[#0d1117] text-slate-200 font-sans selection:bg-emerald-500/30">
@@ -410,27 +414,19 @@ const App: React.FC = () => {
       `}</style>
 
       <header className="sticky top-0 z-40 bg-[#0d1117]/90 backdrop-blur-md border-b border-slate-800/60 shadow-2xl transition-all w-full">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex flex-row justify-between items-center">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex justify-between items-center">
           <div className="flex items-center gap-2">
-             <div className="hidden md:flex items-center gap-2 mr-2">
-               <div className="bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50 flex items-center gap-2 shadow-sm">
-                 <div className={`w-2 h-2 rounded-full ${settings.isRunning ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-rose-500'}`}></div>
-                 <span className="text-xs font-medium text-slate-300 tracking-wide">{items.length} <span className="text-slate-500 text-[10px]">itens</span></span>
-               </div>
-             </div>
-             
-             <button onClick={acknowledgeAll} disabled={activeAlertsCount === 0} className={`px-3 h-[36px] rounded-lg text-xs font-medium flex items-center gap-2 shadow-lg transition-all active:scale-95 ${activeAlertsCount > 0 ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/20' : 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700'}`}>
+             <button onClick={acknowledgeAll} disabled={activeAlertsCount === 0} className={`px-3 h-[36px] rounded-lg text-xs font-bold flex items-center gap-2 shadow-lg transition-all active:scale-95 ${activeAlertsCount > 0 ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/20' : 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700'}`}>
                 <ListChecks size={16} /><span className="hidden sm:inline">Visto Geral</span>
                 <span className={`${activeAlertsCount > 0 ? 'bg-white/20 text-white' : 'bg-slate-700 text-slate-500'} px-1.5 rounded text-[10px] font-bold`}>{activeAlertsCount}</span>
              </button>
 
              <button 
                 onClick={() => setFilterRedAlerts(!filterRedAlerts)} 
-                className={`hidden sm:flex items-center gap-2 px-3 h-[36px] rounded-lg text-xs font-bold transition-all border shadow-lg ${filterRedAlerts ? 'bg-rose-600 border-rose-400 text-white shadow-rose-900/40' : (redAlertsTotal > 0 ? 'bg-slate-800 border-rose-500/50 text-rose-400 hover:bg-rose-950/20' : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300')}`}
-                title="Mostrar apenas alertas de competição (Vermelhos)"
+                className={`flex items-center gap-2 px-3 h-[36px] rounded-lg text-xs font-bold transition-all border shadow-lg ${filterRedAlerts ? 'bg-rose-600 border-rose-400 text-white shadow-rose-900/40' : (redAlertsTotal > 0 ? 'bg-slate-800 border-rose-500/50 text-rose-400 hover:bg-rose-950/20' : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300')}`}
              >
                 <AlertTriangle size={16} className={filterRedAlerts ? 'animate-pulse' : (redAlertsTotal > 0 ? 'text-rose-500' : '')} />
-                <span className="hidden md:inline uppercase tracking-tighter">Ver Vermelhos</span>
+                <span className="hidden md:inline uppercase tracking-tighter">Aba Vermelha</span>
                 <span className={`px-1.5 rounded text-[10px] font-bold ${filterRedAlerts ? 'bg-white text-rose-600' : (redAlertsTotal > 0 ? 'bg-rose-500 text-white' : 'bg-slate-700 text-slate-500')}`}>{redAlertsTotal}</span>
              </button>
           </div>
@@ -440,14 +436,14 @@ const App: React.FC = () => {
                 <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider text-center">Preço (KK)</span>
                 <div className="flex items-center bg-slate-950/50 rounded px-2 py-0.5 w-24 border border-slate-800 focus-within:border-slate-600 transition-colors">
                    <span className="text-[10px] text-emerald-600 mr-1">$</span>
-                   <input className="w-full bg-transparent text-xs font-mono text-emerald-100 focus:outline-none placeholder-slate-700" placeholder="0,00" value={calcPrice} onChange={e => setCalcPrice(e.target.value)} />
+                   <input className="w-full bg-transparent text-xs font-mono text-emerald-100 focus:outline-none" placeholder="0,00" value={calcPrice} onChange={e => setCalcPrice(e.target.value)} />
                 </div>
              </div>
              <span className="text-slate-600 pb-3">×</span>
              <div className="flex flex-col px-1">
                 <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider text-center">Qtd</span>
                 <div className="flex items-center bg-slate-950/50 rounded px-2 py-0.5 w-20 border border-slate-800 focus-within:border-slate-600 transition-colors">
-                   <input className="w-full bg-transparent text-xs font-mono text-blue-100 focus:outline-none text-center placeholder-slate-700" placeholder="1" value={calcQty} onChange={e => setCalcQty(e.target.value)} />
+                   <input className="w-full bg-transparent text-xs font-mono text-blue-100 focus:outline-none text-center" placeholder="1" value={calcQty} onChange={e => setCalcQty(e.target.value)} />
                 </div>
              </div>
              <span className="text-slate-600 pb-3">=</span>
@@ -455,7 +451,7 @@ const App: React.FC = () => {
                 <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider text-center">Total (R$)</span>
                 <div className="flex items-center bg-slate-950/50 rounded px-2 py-0.5 w-24 border border-slate-800 focus-within:border-slate-600 transition-colors">
                    <span className="text-[10px] text-amber-600 mr-1">R$</span>
-                   <input className="w-full bg-transparent text-xs font-mono text-amber-100 focus:outline-none placeholder-slate-700" placeholder="0,00" value={calcTotal} onChange={e => handleTotalChange(e.target.value)} />
+                   <input className="w-full bg-transparent text-xs font-mono text-amber-100 focus:outline-none" placeholder="0,00" value={calcTotal} onChange={e => handleTotalChange(e.target.value)} />
                 </div>
              </div>
           </div>
@@ -476,14 +472,10 @@ const App: React.FC = () => {
       </header>
       
       <main className="p-2 md:p-8 max-w-6xl mx-auto">
-        {settings.isRunning && isNightPause && !settings.ignoreNightPause && (
-          <div className="mb-4 bg-yellow-900/20 border border-yellow-700/50 text-yellow-500 p-2 rounded text-center text-xs flex items-center justify-center gap-2"><Moon size={14} /> Pausa Noturna de Varredura (01h-08h)</div>
-        )}
-
         {filterRedAlerts && (
-          <div className="mb-4 bg-rose-950/40 border border-rose-500/50 text-rose-100 p-3 rounded-lg text-center text-[10px] md:text-xs flex items-center justify-center gap-3 shadow-inner">
+          <div className="mb-4 bg-rose-950/40 border border-rose-500/50 text-rose-100 p-3 rounded-lg text-center text-xs flex items-center justify-center gap-3 shadow-inner">
             <Filter size={16} className="text-rose-400" /> 
-            <span className="font-bold tracking-tight uppercase">Filtro Ativado: Mostrando apenas itens em Vermelho</span>
+            <span className="font-bold tracking-tight uppercase">Filtro Ativado: Mostrando Apenas Disputas de Preço</span>
             <button onClick={() => setFilterRedAlerts(false)} className="bg-rose-500 hover:bg-rose-400 text-white px-2 py-1 rounded text-[10px] font-bold shadow-lg transition-all active:scale-95">MOSTRAR TUDO</button>
           </div>
         )}
