@@ -19,7 +19,9 @@ import {
   X,
   Pin,
   ThumbsUp,
-  Check
+  Check,
+  AlertTriangle,
+  Filter
 } from 'lucide-react';
 
 const SYNC_INTERVAL_MS = 2000;
@@ -28,6 +30,7 @@ const App: React.FC = () => {
   const [items, setItems] = useState<Item[]>(MOCK_ITEMS);
   const [settings, setSettings] = useState<Settings>(INITIAL_SETTINGS);
   const [dataLoaded, setDataLoaded] = useState(false);
+  const [filterRedAlerts, setFilterRedAlerts] = useState(false);
   const [volume, setVolume] = useState<number>(() => {
     const saved = localStorage.getItem('ro_volume');
     return saved !== null ? parseFloat(saved) : 0.5;
@@ -307,21 +310,26 @@ const App: React.FC = () => {
       const aActiveRed = aCompAlert && !a.isAck;
       const bActiveRed = bCompAlert && !b.isAck;
 
-      // 1. Alertas Verdes Ativos (Oportunidade)
       if (aActiveGreen && !bActiveGreen) return -1;
       if (!aActiveGreen && bActiveGreen) return 1;
-
-      // 2. Alertas Vermelhos Ativos (Competição)
       if (aActiveRed && !bActiveRed) return -1;
       if (!aActiveRed && bActiveRed) return 1;
-
-      // 3. Fixados
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
-
-      // 4. Ordem Alfabética (Joia sem alerta ativo cai aqui agora)
       return a.name.localeCompare(b.name);
   });
+
+  const redAlertsTotal = items.filter(item => {
+    const isDeal = item.lastPrice && item.lastPrice > 0 && item.lastPrice <= item.targetPrice;
+    return item.isUserPrice && item.lastPrice !== null && item.lastPrice !== item.userKnownPrice && !isDeal;
+  }).length;
+
+  const displayedItems = filterRedAlerts 
+    ? sortedItems.filter(item => {
+        const isDeal = item.lastPrice && item.lastPrice > 0 && item.lastPrice <= item.targetPrice;
+        return item.isUserPrice && item.lastPrice !== null && item.lastPrice !== item.userKnownPrice && !isDeal;
+      })
+    : sortedItems;
 
   const activeAlertsCount = items.filter(i => {
     const isDeal = (i.lastPrice && i.lastPrice <= i.targetPrice) || i.hasPriceDrop;
@@ -376,20 +384,32 @@ const App: React.FC = () => {
 
       <header className="sticky top-0 z-40 bg-[#0d1117]/90 backdrop-blur-md border-b border-slate-800/60 shadow-2xl transition-all w-full">
         <div className="max-w-6xl mx-auto px-4 py-3 flex flex-row justify-between items-center">
-          <div className="flex items-center gap-3">
-             <div className="hidden md:flex items-center gap-2">
+          <div className="flex items-center gap-2">
+             <div className="hidden md:flex items-center gap-2 mr-2">
                <div className="bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700/50 flex items-center gap-2 shadow-sm">
                  <div className={`w-2 h-2 rounded-full ${settings.isRunning ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-rose-500'}`}></div>
-                 <span className="text-xs font-medium text-slate-300 tracking-wide">{items.length} <span className="text-slate-500">itens</span></span>
+                 <span className="text-xs font-medium text-slate-300 tracking-wide">{items.length} <span className="text-slate-500 text-[10px]">itens</span></span>
                </div>
              </div>
+             
              <button onClick={acknowledgeAll} disabled={activeAlertsCount === 0} className={`px-3 h-[36px] rounded-lg text-xs font-medium flex items-center gap-2 shadow-lg transition-all active:scale-95 ${activeAlertsCount > 0 ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/20' : 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700'}`}>
                 <ListChecks size={16} /><span className="hidden sm:inline">Visto Geral</span>
                 <span className={`${activeAlertsCount > 0 ? 'bg-white/20 text-white' : 'bg-slate-700 text-slate-500'} px-1.5 rounded text-[10px] font-bold`}>{activeAlertsCount}</span>
              </button>
+
+             {/* BOTÃO DE FILTRO DE VERMELHOS - SEMPRE VISÍVEL NO DESKTOP */}
+             <button 
+                onClick={() => setFilterRedAlerts(!filterRedAlerts)} 
+                className={`hidden sm:flex items-center gap-2 px-3 h-[36px] rounded-lg text-xs font-bold transition-all border shadow-lg ${filterRedAlerts ? 'bg-rose-600 border-rose-400 text-white shadow-rose-900/40' : (redAlertsTotal > 0 ? 'bg-slate-800 border-rose-500/50 text-rose-400 hover:bg-rose-950/20' : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300')}`}
+                title="Mostrar apenas alertas de competição (Vermelhos)"
+             >
+                <AlertTriangle size={16} className={filterRedAlerts ? 'animate-pulse' : (redAlertsTotal > 0 ? 'text-rose-500' : '')} />
+                <span className="hidden md:inline uppercase tracking-tighter">Ver Vermelhos</span>
+                <span className={`px-1.5 rounded text-[10px] font-bold ${filterRedAlerts ? 'bg-white text-rose-600' : (redAlertsTotal > 0 ? 'bg-rose-500 text-white' : 'bg-slate-700 text-slate-500')}`}>{redAlertsTotal}</span>
+             </button>
           </div>
           
-          <div className="hidden md:flex items-center gap-1 bg-slate-900/50 border border-slate-800 p-1.5 rounded-lg shadow-inner">
+          <div className="hidden lg:flex items-center gap-1 bg-slate-900/50 border border-slate-800 p-1.5 rounded-lg shadow-inner">
              <div className="flex flex-col px-1">
                 <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider text-center">Preço (KK)</span>
                 <div className="flex items-center bg-slate-950/50 rounded px-2 py-0.5 w-24 border border-slate-800 focus-within:border-slate-600 transition-colors">
@@ -434,6 +454,14 @@ const App: React.FC = () => {
           <div className="mb-4 bg-yellow-900/20 border border-yellow-700/50 text-yellow-500 p-2 rounded text-center text-xs flex items-center justify-center gap-2"><Moon size={14} /> Pausa Noturna de Varredura (01h-08h)</div>
         )}
 
+        {filterRedAlerts && (
+          <div className="mb-4 bg-rose-950/40 border border-rose-500/50 text-rose-100 p-3 rounded-lg text-center text-[10px] md:text-xs flex items-center justify-center gap-3 shadow-inner">
+            <Filter size={16} className="text-rose-400" /> 
+            <span className="font-bold tracking-tight uppercase">Visualizando apenas disputas de preço (Vermelho)</span>
+            <button onClick={() => setFilterRedAlerts(false)} className="bg-rose-500 hover:bg-rose-400 text-white px-2 py-1 rounded text-[10px] font-bold shadow-lg transition-all active:scale-95">MOSTRAR TUDO</button>
+          </div>
+        )}
+
         <div className="bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden shadow-2xl">
            <div className="p-4 bg-[#0d1117] border-b border-[#30363d]">
                <div className={`${isAddExpanded ? 'flex' : 'hidden'} md:flex flex-col md:flex-row gap-2`}>
@@ -442,12 +470,12 @@ const App: React.FC = () => {
                   <button onClick={addNewItem} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold flex items-center justify-center gap-1 shadow-lg shadow-blue-900/20"><Plus size={16}/> ADICIONAR</button>
                </div>
                <div className="md:hidden mt-2">
-                   <button onClick={() => setIsAddExpanded(!isAddExpanded)} className="text-slate-500 text-xs w-full py-2 font-bold tracking-widest">{isAddExpanded ? 'RECOLHER PAINEL' : 'NOVO MONITORAMENTO'}</button>
+                   <button onClick={() => setIsAddExpanded(!isAddExpanded)} className="text-slate-500 text-xs w-full py-2 font-bold tracking-widest uppercase">{isAddExpanded ? 'Fechar' : 'Novo Monitoramento'}</button>
                </div>
            </div>
            
            <div className="divide-y divide-[#30363d]">
-              {sortedItems.map(item => {
+              {displayedItems.map(item => {
                  const isDeal = item.lastPrice && item.lastPrice > 0 && item.lastPrice <= item.targetPrice;
                  const isCompAlert = item.isUserPrice && item.lastPrice !== null && item.lastPrice !== item.userKnownPrice && !isDeal;
                  const isAck = item.isAck;
@@ -503,7 +531,11 @@ const App: React.FC = () => {
                    </div>
                  );
               })}
-              {items.length === 0 && <div className="p-12 text-center text-slate-500 font-mono text-sm">LISTA DE MONITORAMENTO VAZIA</div>}
+              {displayedItems.length === 0 && (
+                <div className="p-12 text-center text-slate-500 font-mono text-sm uppercase tracking-widest border-2 border-dashed border-slate-800 m-4 rounded-xl">
+                  {filterRedAlerts ? 'Nenhum alerta vermelho ativo' : 'Monitoramento Vazio'}
+                </div>
+              )}
            </div>
         </div>
       </main>
