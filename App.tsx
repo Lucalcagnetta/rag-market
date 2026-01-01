@@ -52,6 +52,7 @@ const App: React.FC = () => {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const previousItemsRef = useRef<Item[]>([]); 
   const pendingAcksRef = useRef<Set<string>>(new Set());
+  const initialFetchDone = useRef(false);
 
   // --- LÓGICA DA CALCULADORA ---
   useEffect(() => {
@@ -152,7 +153,12 @@ const App: React.FC = () => {
              });
              setItems(mergedItems);
              setSettings(data.settings || INITIAL_SETTINGS);
-             if (!dataLoaded) { setDataLoaded(true); setTempSettings(data.settings || INITIAL_SETTINGS); }
+             if (!dataLoaded) { 
+               setDataLoaded(true); 
+               setTempSettings(data.settings || INITIAL_SETTINGS);
+               previousItemsRef.current = mergedItems;
+               initialFetchDone.current = true;
+             }
           }
         }
       } catch (e) { console.error("Sync error", e); }
@@ -163,7 +169,7 @@ const App: React.FC = () => {
   }, [editingItem, dataLoaded]);
 
   useEffect(() => {
-    if (!dataLoaded) return;
+    if (!dataLoaded || !initialFetchDone.current) return;
     const prevItems = previousItemsRef.current;
     
     items.forEach(newItem => {
@@ -174,12 +180,14 @@ const App: React.FC = () => {
             const isDeal = newItem.lastPrice && newItem.lastPrice > 0 && newItem.lastPrice <= newItem.targetPrice;
             const isCompAlert = newItem.isUserPrice && newItem.lastPrice !== null && newItem.lastPrice !== newItem.userKnownPrice;
             
-            const statusChanged = oldItem?.isAck !== false;
-            const priceChanged = oldItem && oldItem.lastPrice !== newItem.lastPrice && newItem.lastPrice !== null;
+            // Lógica de som ativada em qualquer mudança de preço durante o alerta
+            const justAlerted = (oldItem && oldItem.isAck !== false && newItem.isAck === false);
+            const priceChanged = oldItem && oldItem.lastPrice !== null && newItem.lastPrice !== null && oldItem.lastPrice !== newItem.lastPrice;
 
-            if (statusChanged || priceChanged) {
-                if (isDeal) playSound('deal');
-                else if (isCompAlert) playSound('competition');
+            if (justAlerted || priceChanged) {
+                // Prioridade para o som de competição se o item estiver marcado como "meu"
+                if (isCompAlert) playSound('competition');
+                else if (isDeal) playSound('deal');
                 else if (newItem.hasPriceDrop) playSound('drop');
             }
         }
@@ -266,8 +274,11 @@ const App: React.FC = () => {
     initAudio();
     const newList = items.map(i => {
       if (i.id === id) {
-        const isRemoving = i.isUserPrice && i.lastPrice === i.userKnownPrice;
-        if (isRemoving) return { ...i, isUserPrice: false, userKnownPrice: null };
+        // Se já está marcado como "meu preço", removemos a marcação totalmente
+        if (i.isUserPrice) {
+          return { ...i, isUserPrice: false, userKnownPrice: null, isAck: true, hasPriceDrop: false };
+        }
+        // Caso contrário, marcamos como "meu preço" usando o valor atual do mercado
         return { ...i, isUserPrice: true, userKnownPrice: i.lastPrice, isAck: true };
       }
       return i;
@@ -510,8 +521,8 @@ const App: React.FC = () => {
 
                       <div className="w-full md:w-auto flex items-center justify-center md:justify-end relative min-h-[50px]">
                           <div className="absolute left-0 md:static md:mr-6 flex gap-2">
-                              {((isDeal || item.hasPriceDrop) && !isAck) && (
-                                   <button onClick={() => acknowledgeItem(item.id)} className="text-emerald-500 hover:bg-emerald-500/10 p-2 rounded-full transition-all" title="Marcar Promoção como Visto"><Eye size={22}/></button>
+                              {((isDeal || item.hasPriceDrop || isCompAlert) && !isAck) && (
+                                   <button onClick={() => acknowledgeItem(item.id)} className={`p-2 rounded-full transition-all ${isCompAlert ? 'text-rose-500 hover:bg-rose-500/10' : 'text-emerald-500 hover:bg-emerald-500/10'}`} title="Marcar como Visto"><Eye size={22}/></button>
                               )}
                           </div>
                           <div className="flex items-center justify-center gap-6">
@@ -531,7 +542,7 @@ const App: React.FC = () => {
                          {isCompAlert && (
                             <button onClick={() => confirmNewUserPrice(item.id)} className="p-2 text-blue-400 animate-pulse bg-blue-400/10 rounded-lg border border-blue-400/30 transition-all hover:bg-blue-400/20" title="Confirmar meu novo preço"><Check size={20}/></button>
                          )}
-                         <button title={isCompAlert ? "Atualizar meu preço" : "Marcar como meu preço"} onClick={() => toggleUserPrice(item.id)} className={`p-2 transition-all active:scale-90 ${item.isUserPrice ? (isCompAlert ? 'text-rose-500' : 'text-blue-400') : 'text-slate-500 hover:text-blue-300'}`}><ThumbsUp size={18} className={item.isUserPrice ? (isCompAlert ? "fill-rose-500" : "fill-blue-400") : ""} /></button>
+                         <button title={item.isUserPrice ? "Remover minha marcação" : "Marcar como meu preço"} onClick={() => toggleUserPrice(item.id)} className={`p-2 transition-all active:scale-90 ${item.isUserPrice ? (isCompAlert ? 'text-rose-500' : 'text-blue-400') : 'text-slate-500 hover:text-blue-300'}`}><ThumbsUp size={18} className={item.isUserPrice ? (isCompAlert ? "fill-rose-500" : "fill-blue-400") : ""} /></button>
                          <button title="Fixar no Topo" onClick={() => togglePin(item.id)} className={`p-2 transition-all active:scale-90 ${item.isPinned ? 'text-blue-500' : 'text-slate-500 hover:text-blue-400'}`}><Pin size={18} className={item.isPinned ? "fill-blue-500" : ""} /></button>
                          <button title="Forçar Busca" onClick={() => resetItem(item.id)} className="text-slate-500 hover:text-emerald-400 p-2 transition-all"><RefreshCw size={18}/></button>
                          <button title="Editar" onClick={() => { setEditingItem(item); setEditingTargetInput(formatMoney(item.targetPrice).replace('z','').trim()); }} className="text-slate-500 hover:text-blue-400 p-2"><Edit2 size={18}/></button>
@@ -567,7 +578,7 @@ const App: React.FC = () => {
 
       {editingItem && (
           <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-             <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-lg w-full max-w-sm shadow-2xl">
+             <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-lg w-full max-sm shadow-2xl">
                 <h3 className="font-bold mb-6 flex items-center gap-2 text-blue-400"><Edit2 size={18}/> AJUSTAR MONITOR</h3>
                 <div className="space-y-4">
                     <input className="w-full bg-slate-950 border border-slate-700 p-3 rounded-lg text-white font-medium" value={editingItem.name} onChange={e => setEditingItem({...editingItem, name: e.target.value})} />
