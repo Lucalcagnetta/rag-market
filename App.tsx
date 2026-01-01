@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Item, Settings, Status } from './types';
 import { INITIAL_SETTINGS, MOCK_ITEMS } from './constants';
@@ -170,14 +169,16 @@ const App: React.FC = () => {
         const oldItem = prevItems.find(p => p.id === newItem.id);
         const isPendingAck = pendingAcksRef.current.has(newItem.id);
         
+        // Se o item não está marcado como visto (isAck=false) e não há ação pendente
         if (!newItem.isAck && !isPendingAck) {
             const isDeal = newItem.lastPrice && newItem.lastPrice > 0 && newItem.lastPrice <= newItem.targetPrice;
             const isCompAlert = newItem.isUserPrice && newItem.lastPrice !== null && newItem.lastPrice !== newItem.userKnownPrice;
             
-            const statusChanged = oldItem?.isAck !== false;
+            // Detecta se houve mudança real desde a última sincronização para disparar o som
+            const statusChangedFromAcked = oldItem?.isAck !== false && newItem.isAck === false;
             const priceChanged = oldItem && oldItem.lastPrice !== newItem.lastPrice && newItem.lastPrice !== null;
 
-            if (statusChanged || priceChanged) {
+            if (statusChangedFromAcked || priceChanged) {
                 if (isDeal) playSound('deal');
                 else if (isCompAlert) playSound('competition');
                 else if (newItem.hasPriceDrop) playSound('drop');
@@ -510,8 +511,8 @@ const App: React.FC = () => {
 
                       <div className="w-full md:w-auto flex items-center justify-center md:justify-end relative min-h-[50px]">
                           <div className="absolute left-0 md:static md:mr-6 flex gap-2">
-                              {((isDeal || item.hasPriceDrop) && !isAck) && (
-                                   <button onClick={() => acknowledgeItem(item.id)} className="text-emerald-500 hover:bg-emerald-500/10 p-2 rounded-full transition-all" title="Marcar Promoção como Visto"><Eye size={22}/></button>
+                              {((isDeal || item.hasPriceDrop || isCompAlert) && !isAck) && (
+                                   <button onClick={() => acknowledgeItem(item.id)} className={`p-2 rounded-full transition-all ${isCompAlert ? 'text-rose-500 hover:bg-rose-500/10' : 'text-emerald-500 hover:bg-emerald-500/10'}`} title="Marcar como Visto"><Eye size={22}/></button>
                               )}
                           </div>
                           <div className="flex items-center justify-center gap-6">
