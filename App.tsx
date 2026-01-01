@@ -52,6 +52,7 @@ const App: React.FC = () => {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const previousItemsRef = useRef<Item[]>([]); 
   const pendingAcksRef = useRef<Set<string>>(new Set());
+  const initialFetchDone = useRef(false); // Para silenciar o primeiro carregamento
 
   // --- LÓGICA DA CALCULADORA ---
   useEffect(() => {
@@ -152,7 +153,13 @@ const App: React.FC = () => {
              });
              setItems(mergedItems);
              setSettings(data.settings || INITIAL_SETTINGS);
-             if (!dataLoaded) { setDataLoaded(true); setTempSettings(data.settings || INITIAL_SETTINGS); }
+             if (!dataLoaded) { 
+               setDataLoaded(true); 
+               setTempSettings(data.settings || INITIAL_SETTINGS);
+               // Sincroniza previousItemsRef com o primeiro carregamento para evitar barulho inicial
+               previousItemsRef.current = mergedItems;
+               initialFetchDone.current = true;
+             }
           }
         }
       } catch (e) { console.error("Sync error", e); }
@@ -163,25 +170,26 @@ const App: React.FC = () => {
   }, [editingItem, dataLoaded]);
 
   useEffect(() => {
-    if (!dataLoaded) return;
+    // Só processa sons se já tiver feito o carregamento inicial silencioso
+    if (!dataLoaded || !initialFetchDone.current) return;
     const prevItems = previousItemsRef.current;
     
     items.forEach(newItem => {
         const oldItem = prevItems.find(p => p.id === newItem.id);
         const isPendingAck = pendingAcksRef.current.has(newItem.id);
         
-        // Se o item não está marcado como visto (isAck=false) e não há ação pendente
         if (!newItem.isAck && !isPendingAck) {
             const isDeal = newItem.lastPrice && newItem.lastPrice > 0 && newItem.lastPrice <= newItem.targetPrice;
             const isCompAlert = newItem.isUserPrice && newItem.lastPrice !== null && newItem.lastPrice !== newItem.userKnownPrice;
             
-            // Lógica refinada para disparar o som:
-            // 1. Mudou de Visto para Não Visto
-            const justAlerted = (oldItem?.isAck !== false && newItem.isAck === false);
-            // 2. Já estava em alerta mas o preço mudou (ignora nulls iniciais)
-            const priceChangedDuringAlert = oldItem && oldItem.lastPrice !== null && newItem.lastPrice !== null && oldItem.lastPrice !== newItem.lastPrice;
+            // Lógica sonora REFORÇADA:
+            // 1. Toca se acabou de entrar em alerta (era isAck=true e agora é false)
+            const justAlerted = (oldItem && oldItem.isAck !== false && newItem.isAck === false);
+            
+            // 2. Toca se o preço MUDOU enquanto já estava em alerta (evita bipes redundantes no mesmo preço)
+            const priceChanged = oldItem && oldItem.lastPrice !== null && newItem.lastPrice !== null && oldItem.lastPrice !== newItem.lastPrice;
 
-            if (justAlerted || priceChangedDuringAlert) {
+            if (justAlerted || priceChanged) {
                 if (isDeal) playSound('deal');
                 else if (isCompAlert) playSound('competition');
                 else if (newItem.hasPriceDrop) playSound('drop');
