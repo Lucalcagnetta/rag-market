@@ -15,10 +15,10 @@ const HOST = '0.0.0.0';
 // =======================================================
 // CONFIGURAÇÕES DE PERFORMANCE
 // =======================================================
-const UPDATE_INTERVAL_MS = 120 * 1000; // 2 minutos (Voltou ao padrão solicitado)
+const UPDATE_INTERVAL_MS = 120 * 1000; // 2 minutos entre pesquisas do mesmo item
 const ERROR_RETRY_MS = 60 * 1000;     // 1 minuto se der erro
 const LOOP_TICK_MS = 1500;            // Checa a fila a cada 1.5s
-const MAX_CONCURRENT_ROBOTS = 2;      // 2 pesquisas simultâneas (2 robôs)
+const MAX_CONCURRENT_ROBOTS = 2;      // 2 pesquisas simultâneas
 
 // Configuração do Banco de Dados JSON
 const DATA_DIR = join(__dirname, 'data');
@@ -194,7 +194,7 @@ app.get('/api/search', async (req, res) => {
 });
 
 // =======================================================
-// AUTOMATION (ROBÔ COM PARALELISMO)
+// AUTOMATION (ROBÔS BIDIRECIONAIS)
 // =======================================================
 
 const processItem = async (item) => {
@@ -219,7 +219,6 @@ const processItem = async (item) => {
   item.status = isSuccess ? 'OK' : 'ERRO';
   item.message = result.error || undefined;
   
-  // Agendamento de 2 minutos
   item.nextUpdate = Date.now() + (isSuccess ? UPDATE_INTERVAL_MS : ERROR_RETRY_MS);
   
   if (shouldAlert) {
@@ -230,27 +229,43 @@ const processItem = async (item) => {
   saveDB();
 };
 
-// Loop principal que gerencia o paralelismo (2 robôs)
+// Loop principal que gerencia o paralelismo com varredura bidirecional
 setInterval(async () => {
   if (!GLOBAL_DB.settings?.isRunning) return;
   
   const now = Date.now();
+  const activeItems = GLOBAL_DB.items.filter(i => i.status === 'LOADING');
+  const activeIds = new Set(activeItems.map(i => i.id));
   
-  // Conta quantos robôs estão ocupados (LOADING)
-  const activeJobs = GLOBAL_DB.items.filter(i => i.status === 'LOADING').length;
-  
-  // Se ainda temos "vagas" para robôs (máximo 2), pegamos o próximo da fila
-  if (activeJobs < MAX_CONCURRENT_ROBOTS) {
+  // Se houver vaga para robôs (máximo 2 simultâneos)
+  if (activeItems.length < MAX_CONCURRENT_ROBOTS) {
+    // Identifica todos os candidatos que precisam de atualização agora
     const candidates = GLOBAL_DB.items
-      .filter(i => i.status !== 'LOADING' && (i.nextUpdate || 0) <= now)
-      .sort((a, b) => (a.nextUpdate || 0) - (b.nextUpdate || 0));
+      .filter(i => !activeIds.has(i.id) && (i.nextUpdate || 0) <= now);
 
-    // Pega o melhor candidato se houver
     if (candidates.length > 0) {
-      // Não damos await aqui para não bloquear o loop de disparar o próximo robô
-      processItem(candidates[0]);
+      if (activeItems.length === 0) {
+        // Cenário 1: Nenhum robô trabalhando -> Dispara um do Topo e um do Fundo
+        processItem(candidates[0]); // Top-Down
+        if (candidates.length > 1) {
+          processItem(candidates[candidates.length - 1]); // Bottom-Up
+        }
+      } else {
+        // Cenário 2: Um robô já está trabalhando -> Dispara o candidato da ponta oposta
+        const activeItem = activeItems[0];
+        const activeIndex = GLOBAL_DB.items.findIndex(i => i.id === activeItem.id);
+        const listMidPoint = Math.floor(GLOBAL_DB.items.length / 2);
+        
+        if (activeIndex < listMidPoint) {
+           // O robô ativo está na parte de CIMA, o novo robô começa de BAIXO
+           processItem(candidates[candidates.length - 1]);
+        } else {
+           // O robô ativo está na parte de BAIXO, o novo robô começa de CIMA
+           processItem(candidates[0]);
+        }
+      }
     }
   }
 }, LOOP_TICK_MS);
 
-app.listen(PORT, HOST, () => console.log(`Server ON: ${PORT} (2 Robôs Ativos - Ciclo 2min)`));
+app.listen(PORT, HOST, () => console.log(`Server ON: ${PORT} (Bi-Directional Robots Enabled)`));
