@@ -95,7 +95,7 @@ const performScrape = async (item, cookie) => {
   try {
     const headers = {
       'Cookie': userCookie,
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Bird/1.0) Chrome/123.0.0.0 Safari/537.36',
     };
 
     const controller = new AbortController();
@@ -207,11 +207,14 @@ const processItem = async (item) => {
   const oldPrice = item.lastPrice;
   const isSuccess = result.success;
 
-  const isCompChange = isSuccess && item.isUserPrice && newPrice !== null && newPrice !== item.userKnownPrice;
+  // Condições de alerta
+  const isCompAlert = isSuccess && item.isUserPrice && newPrice !== null && newPrice !== item.userKnownPrice;
   const isPriceDrop = isSuccess && newPrice !== null && oldPrice !== null && newPrice < oldPrice;
   const isNewDeal = isSuccess && newPrice !== null && newPrice > 0 && newPrice <= item.targetPrice;
 
-  const shouldAlert = isPriceDrop || isNewDeal || isCompChange;
+  // Só marca como isAck=false se for um NOVO alerta ou se o preço mudou enquanto estava em alerta
+  const hasAlertCondition = isPriceDrop || isNewDeal || isCompAlert;
+  const isNewAlert = hasAlertCondition && (item.isAck !== false || newPrice !== oldPrice);
 
   delete item._loadingStart;
   item.lastPrice = newPrice;
@@ -221,7 +224,7 @@ const processItem = async (item) => {
   
   item.nextUpdate = Date.now() + (isSuccess ? UPDATE_INTERVAL_MS : ERROR_RETRY_MS);
   
-  if (shouldAlert) {
+  if (isNewAlert) {
      item.isAck = false;
      if (isPriceDrop) item.hasPriceDrop = true;
   }
@@ -237,30 +240,24 @@ setInterval(async () => {
   const activeItems = GLOBAL_DB.items.filter(i => i.status === 'LOADING');
   const activeIds = new Set(activeItems.map(i => i.id));
   
-  // Se houver vaga para robôs (máximo 2 simultâneos)
   if (activeItems.length < MAX_CONCURRENT_ROBOTS) {
-    // Identifica todos os candidatos que precisam de atualização agora
     const candidates = GLOBAL_DB.items
       .filter(i => !activeIds.has(i.id) && (i.nextUpdate || 0) <= now);
 
     if (candidates.length > 0) {
       if (activeItems.length === 0) {
-        // Cenário 1: Nenhum robô trabalhando -> Dispara um do Topo e um do Fundo
         processItem(candidates[0]); // Top-Down
         if (candidates.length > 1) {
           processItem(candidates[candidates.length - 1]); // Bottom-Up
         }
       } else {
-        // Cenário 2: Um robô já está trabalhando -> Dispara o candidato da ponta oposta
         const activeItem = activeItems[0];
         const activeIndex = GLOBAL_DB.items.findIndex(i => i.id === activeItem.id);
         const listMidPoint = Math.floor(GLOBAL_DB.items.length / 2);
         
         if (activeIndex < listMidPoint) {
-           // O robô ativo está na parte de CIMA, o novo robô começa de BAIXO
            processItem(candidates[candidates.length - 1]);
         } else {
-           // O robô ativo está na parte de BAIXO, o novo robô começa de CIMA
            processItem(candidates[0]);
         }
       }

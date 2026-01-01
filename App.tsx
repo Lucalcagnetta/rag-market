@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Item, Settings, Status } from './types';
 import { INITIAL_SETTINGS, MOCK_ITEMS } from './constants';
@@ -174,11 +175,13 @@ const App: React.FC = () => {
             const isDeal = newItem.lastPrice && newItem.lastPrice > 0 && newItem.lastPrice <= newItem.targetPrice;
             const isCompAlert = newItem.isUserPrice && newItem.lastPrice !== null && newItem.lastPrice !== newItem.userKnownPrice;
             
-            // Detecta se houve mudança real desde a última sincronização para disparar o som
-            const statusChangedFromAcked = oldItem?.isAck !== false && newItem.isAck === false;
-            const priceChanged = oldItem && oldItem.lastPrice !== newItem.lastPrice && newItem.lastPrice !== null;
+            // Lógica refinada para disparar o som:
+            // 1. Mudou de Visto para Não Visto
+            const justAlerted = (oldItem?.isAck !== false && newItem.isAck === false);
+            // 2. Já estava em alerta mas o preço mudou (ignora nulls iniciais)
+            const priceChangedDuringAlert = oldItem && oldItem.lastPrice !== null && newItem.lastPrice !== null && oldItem.lastPrice !== newItem.lastPrice;
 
-            if (statusChangedFromAcked || priceChanged) {
+            if (justAlerted || priceChangedDuringAlert) {
                 if (isDeal) playSound('deal');
                 else if (isCompAlert) playSound('competition');
                 else if (newItem.hasPriceDrop) playSound('drop');
