@@ -52,7 +52,6 @@ const App: React.FC = () => {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const previousItemsRef = useRef<Item[]>([]); 
   const pendingAcksRef = useRef<Set<string>>(new Set());
-  const initialFetchDone = useRef(false); // Para silenciar o primeiro carregamento
 
   // --- LÓGICA DA CALCULADORA ---
   useEffect(() => {
@@ -153,13 +152,7 @@ const App: React.FC = () => {
              });
              setItems(mergedItems);
              setSettings(data.settings || INITIAL_SETTINGS);
-             if (!dataLoaded) { 
-               setDataLoaded(true); 
-               setTempSettings(data.settings || INITIAL_SETTINGS);
-               // Sincroniza previousItemsRef com o primeiro carregamento para evitar barulho inicial
-               previousItemsRef.current = mergedItems;
-               initialFetchDone.current = true;
-             }
+             if (!dataLoaded) { setDataLoaded(true); setTempSettings(data.settings || INITIAL_SETTINGS); }
           }
         }
       } catch (e) { console.error("Sync error", e); }
@@ -170,8 +163,7 @@ const App: React.FC = () => {
   }, [editingItem, dataLoaded]);
 
   useEffect(() => {
-    // Só processa sons se já tiver feito o carregamento inicial silencioso
-    if (!dataLoaded || !initialFetchDone.current) return;
+    if (!dataLoaded) return;
     const prevItems = previousItemsRef.current;
     
     items.forEach(newItem => {
@@ -182,14 +174,10 @@ const App: React.FC = () => {
             const isDeal = newItem.lastPrice && newItem.lastPrice > 0 && newItem.lastPrice <= newItem.targetPrice;
             const isCompAlert = newItem.isUserPrice && newItem.lastPrice !== null && newItem.lastPrice !== newItem.userKnownPrice;
             
-            // Lógica sonora REFORÇADA:
-            // 1. Toca se acabou de entrar em alerta (era isAck=true e agora é false)
-            const justAlerted = (oldItem && oldItem.isAck !== false && newItem.isAck === false);
-            
-            // 2. Toca se o preço MUDOU enquanto já estava em alerta (evita bipes redundantes no mesmo preço)
-            const priceChanged = oldItem && oldItem.lastPrice !== null && newItem.lastPrice !== null && oldItem.lastPrice !== newItem.lastPrice;
+            const statusChanged = oldItem?.isAck !== false;
+            const priceChanged = oldItem && oldItem.lastPrice !== newItem.lastPrice && newItem.lastPrice !== null;
 
-            if (justAlerted || priceChanged) {
+            if (statusChanged || priceChanged) {
                 if (isDeal) playSound('deal');
                 else if (isCompAlert) playSound('competition');
                 else if (newItem.hasPriceDrop) playSound('drop');
@@ -522,8 +510,8 @@ const App: React.FC = () => {
 
                       <div className="w-full md:w-auto flex items-center justify-center md:justify-end relative min-h-[50px]">
                           <div className="absolute left-0 md:static md:mr-6 flex gap-2">
-                              {((isDeal || item.hasPriceDrop || isCompAlert) && !isAck) && (
-                                   <button onClick={() => acknowledgeItem(item.id)} className={`p-2 rounded-full transition-all ${isCompAlert ? 'text-rose-500 hover:bg-rose-500/10' : 'text-emerald-500 hover:bg-emerald-500/10'}`} title="Marcar como Visto"><Eye size={22}/></button>
+                              {((isDeal || item.hasPriceDrop) && !isAck) && (
+                                   <button onClick={() => acknowledgeItem(item.id)} className="text-emerald-500 hover:bg-emerald-500/10 p-2 rounded-full transition-all" title="Marcar Promoção como Visto"><Eye size={22}/></button>
                               )}
                           </div>
                           <div className="flex items-center justify-center gap-6">
