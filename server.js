@@ -1,3 +1,4 @@
+
 import express from 'express';
 import cors from 'cors';
 import { fileURLToPath } from 'url';
@@ -46,17 +47,13 @@ const saveDB = () => {
   }
 };
 
+// Limpa estados travados ao iniciar o servidor
 const cleanStartupData = () => {
   let changed = false;
   GLOBAL_DB.items = GLOBAL_DB.items.map(item => {
-    if (item.status === 'ERRO' && item.message && item.message.includes('Unexpected token')) {
-      changed = true;
-      return { ...item, status: 'IDLE', nextUpdate: 0, message: undefined };
-    }
     if (item.status === 'LOADING') {
       changed = true;
-      const { _loadingStart, ...rest } = item;
-      return { ...rest, status: 'IDLE', nextUpdate: 0 };
+      return { ...item, status: 'IDLE', nextUpdate: 0 };
     }
     return item;
   });
@@ -148,14 +145,21 @@ app.post('/api/db', (req, res) => {
   try {
     const { items, settings } = req.body;
     
-    // Mapeamento explícito para garantir persistência de campos do usuário
     const mergedItems = items.map(newItem => {
         const existing = GLOBAL_DB.items.find(i => i.id === newItem.id);
+        
         return {
             ...newItem,
-            // Preserva estado de carregamento se houver
+            // PRIORIDADE 1: Preservar campos críticos do servidor que o front não envia ou envia zerado
+            nextUpdate: newItem.nextUpdate || existing?.nextUpdate || 0,
+            status: newItem.status === 'IDLE' ? (existing?.status || 'IDLE') : (newItem.status || existing?.status || 'IDLE'),
+            lastPrice: newItem.lastPrice ?? existing?.lastPrice ?? null,
+            lastUpdated: newItem.lastUpdated ?? existing?.lastUpdated ?? null,
+            
+            // PRIORIDADE 2: Preservar metadados de carregamento
             _loadingStart: existing?._loadingStart,
-            // Garante que flags de usuário sejam respeitadas
+            
+            // PRIORIDADE 3: Garantir flags de usuário vindas do front
             isUserPrice: newItem.isUserPrice ?? existing?.isUserPrice ?? false,
             userKnownPrice: newItem.userKnownPrice ?? existing?.userKnownPrice ?? null,
             isAck: newItem.isAck ?? existing?.isAck ?? true
@@ -189,31 +193,34 @@ app.get('/api/search', async (req, res) => {
 });
 
 // =======================================================
-// AUTOMATION
+// AUTOMATION (ROBÔ)
 // =======================================================
 
 const processItem = async (item) => {
   item.status = 'LOADING';
   item._loadingStart = Date.now();
+  saveDB(); // Salva estado de loading
   
   const result = await performScrape(item.name, GLOBAL_DB.settings.cookie);
   const newPrice = result.price;
   const oldPrice = item.lastPrice;
   const isSuccess = result.success;
 
-  // Mudança de competição: preço atual difere do preço que o usuário fixou como dele
+  // Lógica de Alertas
   const isCompChange = isSuccess && item.isUserPrice && newPrice !== null && newPrice !== item.userKnownPrice;
   const isPriceDrop = isSuccess && newPrice !== null && oldPrice !== null && newPrice < oldPrice;
   const isNewDeal = isSuccess && newPrice !== null && newPrice > 0 && newPrice <= item.targetPrice;
 
-  // Resetar isAck se houver mudança relevante para disparar som no front
   const shouldAlert = isPriceDrop || isNewDeal || isCompChange;
 
   delete item._loadingStart;
   item.lastPrice = newPrice;
   item.lastUpdated = new Date().toISOString();
   item.status = isSuccess ? 'OK' : 'ERRO';
-  item.nextUpdate = Date.now() + (2 * 60 * 1000);
+  item.message = result.error || undefined;
+  
+  // Agendamento: 2 minutos se sucesso, 1 minuto se erro
+  item.nextUpdate = Date.now() + (isSuccess ? (2 * 60 * 1000) : (60 * 1000));
   
   if (shouldAlert) {
      item.isAck = false;
@@ -223,11 +230,19 @@ const processItem = async (item) => {
   saveDB();
 };
 
+// Loop principal de automação
 setInterval(async () => {
   if (!GLOBAL_DB.settings?.isRunning) return;
+  
   const now = Date.now();
-  const candidate = GLOBAL_DB.items.find(i => i.nextUpdate <= now && i.status !== 'LOADING');
-  if (candidate) await processItem(candidate);
+  // Busca o item que mais precisa de atualização (nextUpdate mais antigo)
+  const candidate = GLOBAL_DB.items
+    .filter(i => i.status !== 'LOADING' && (i.nextUpdate || 0) <= now)
+    .sort((a, b) => (a.nextUpdate || 0) - (b.nextUpdate || 0))[0];
+
+  if (candidate) {
+    await processItem(candidate);
+  }
 }, 3000);
 
 app.listen(PORT, HOST, () => console.log(`Server ON: ${PORT}`));
