@@ -12,6 +12,14 @@ const app = express();
 const PORT = 3001;
 const HOST = '0.0.0.0';
 
+// =======================================================
+// CONFIGURAÇÕES DE PERFORMANCE
+// =======================================================
+const UPDATE_INTERVAL_MS = 120 * 1000; // 2 minutos (Voltou ao padrão solicitado)
+const ERROR_RETRY_MS = 60 * 1000;     // 1 minuto se der erro
+const LOOP_TICK_MS = 1500;            // Checa a fila a cada 1.5s
+const MAX_CONCURRENT_ROBOTS = 2;      // 2 pesquisas simultâneas (2 robôs)
+
 // Configuração do Banco de Dados JSON
 const DATA_DIR = join(__dirname, 'data');
 const DB_FILE = join(DATA_DIR, 'db.json');
@@ -47,7 +55,6 @@ const saveDB = () => {
   }
 };
 
-// Limpa estados travados ao iniciar o servidor
 const cleanStartupData = () => {
   let changed = false;
   GLOBAL_DB.items = GLOBAL_DB.items.map(item => {
@@ -147,19 +154,13 @@ app.post('/api/db', (req, res) => {
     
     const mergedItems = items.map(newItem => {
         const existing = GLOBAL_DB.items.find(i => i.id === newItem.id);
-        
         return {
             ...newItem,
-            // PRIORIDADE 1: Preservar campos críticos do servidor que o front não envia ou envia zerado
             nextUpdate: newItem.nextUpdate || existing?.nextUpdate || 0,
             status: newItem.status === 'IDLE' ? (existing?.status || 'IDLE') : (newItem.status || existing?.status || 'IDLE'),
             lastPrice: newItem.lastPrice ?? existing?.lastPrice ?? null,
             lastUpdated: newItem.lastUpdated ?? existing?.lastUpdated ?? null,
-            
-            // PRIORIDADE 2: Preservar metadados de carregamento
             _loadingStart: existing?._loadingStart,
-            
-            // PRIORIDADE 3: Garantir flags de usuário vindas do front
             isUserPrice: newItem.isUserPrice ?? existing?.isUserPrice ?? false,
             userKnownPrice: newItem.userKnownPrice ?? existing?.userKnownPrice ?? null,
             isAck: newItem.isAck ?? existing?.isAck ?? true
@@ -193,20 +194,19 @@ app.get('/api/search', async (req, res) => {
 });
 
 // =======================================================
-// AUTOMATION (ROBÔ)
+// AUTOMATION (ROBÔ COM PARALELISMO)
 // =======================================================
 
 const processItem = async (item) => {
   item.status = 'LOADING';
   item._loadingStart = Date.now();
-  saveDB(); // Salva estado de loading
+  saveDB(); 
   
   const result = await performScrape(item.name, GLOBAL_DB.settings.cookie);
   const newPrice = result.price;
   const oldPrice = item.lastPrice;
   const isSuccess = result.success;
 
-  // Lógica de Alertas
   const isCompChange = isSuccess && item.isUserPrice && newPrice !== null && newPrice !== item.userKnownPrice;
   const isPriceDrop = isSuccess && newPrice !== null && oldPrice !== null && newPrice < oldPrice;
   const isNewDeal = isSuccess && newPrice !== null && newPrice > 0 && newPrice <= item.targetPrice;
@@ -219,8 +219,8 @@ const processItem = async (item) => {
   item.status = isSuccess ? 'OK' : 'ERRO';
   item.message = result.error || undefined;
   
-  // Agendamento: 2 minutos se sucesso, 1 minuto se erro
-  item.nextUpdate = Date.now() + (isSuccess ? (2 * 60 * 1000) : (60 * 1000));
+  // Agendamento de 2 minutos
+  item.nextUpdate = Date.now() + (isSuccess ? UPDATE_INTERVAL_MS : ERROR_RETRY_MS);
   
   if (shouldAlert) {
      item.isAck = false;
@@ -230,19 +230,27 @@ const processItem = async (item) => {
   saveDB();
 };
 
-// Loop principal de automação
+// Loop principal que gerencia o paralelismo (2 robôs)
 setInterval(async () => {
   if (!GLOBAL_DB.settings?.isRunning) return;
   
   const now = Date.now();
-  // Busca o item que mais precisa de atualização (nextUpdate mais antigo)
-  const candidate = GLOBAL_DB.items
-    .filter(i => i.status !== 'LOADING' && (i.nextUpdate || 0) <= now)
-    .sort((a, b) => (a.nextUpdate || 0) - (b.nextUpdate || 0))[0];
+  
+  // Conta quantos robôs estão ocupados (LOADING)
+  const activeJobs = GLOBAL_DB.items.filter(i => i.status === 'LOADING').length;
+  
+  // Se ainda temos "vagas" para robôs (máximo 2), pegamos o próximo da fila
+  if (activeJobs < MAX_CONCURRENT_ROBOTS) {
+    const candidates = GLOBAL_DB.items
+      .filter(i => i.status !== 'LOADING' && (i.nextUpdate || 0) <= now)
+      .sort((a, b) => (a.nextUpdate || 0) - (b.nextUpdate || 0));
 
-  if (candidate) {
-    await processItem(candidate);
+    // Pega o melhor candidato se houver
+    if (candidates.length > 0) {
+      // Não damos await aqui para não bloquear o loop de disparar o próximo robô
+      processItem(candidates[0]);
+    }
   }
-}, 3000);
+}, LOOP_TICK_MS);
 
-app.listen(PORT, HOST, () => console.log(`Server ON: ${PORT}`));
+app.listen(PORT, HOST, () => console.log(`Server ON: ${PORT} (2 Robôs Ativos - Ciclo 2min)`));
