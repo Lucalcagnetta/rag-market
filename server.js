@@ -93,21 +93,14 @@ if (fs.existsSync(distPath)) {
 
 const parsePriceString = (str) => {
   if (!str) return NaN;
-  // Remove tudo que não é dígito
   const numericStr = str.replace(/[^\d]/g, '');
   return parseInt(numericStr, 10);
-};
-
-// Escapa string para regex
-const escapeRegExp = (string) => {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
 };
 
 const performScrape = async (item, cookie) => {
   let userCookie = cookie || ''; 
   if (userCookie) userCookie = userCookie.replace(/[\r\n]+/g, '').trim();
 
-  // A busca usa LIKE%, então precisamos ser espertos na filtragem do resultado
   const targetUrl = `https://ro.gnjoylatam.com/pt/intro/shop-search/trading?storeType=BUY&serverType=FREYA&searchWord=${encodeURIComponent(item)}`;
   
   try {
@@ -142,22 +135,10 @@ const performScrape = async (item, cookie) => {
         return { success: false, price: null, error: 'Precisa de novo Cookie' };
     }
 
-    // --- ESTRATÉGIA DE EXTRAÇÃO DE PREÇO V3 (CONTEXTUAL) ---
-    // O problema anterior era: 
-    // V1 (Estrita): Falhava se o HTML não tivesse 'z' colado.
-    // V2 (Solta): Pegava preços de itens errados (ex: Fragmento custando 12kk quando buscava o Item de 300kk)
-    // V3 (Contextual): Busca o nome do item no HTML e procura um preço logo em seguida.
-
     let prices = [];
-    
-    // Divide o termo de busca em palavras para ser flexível (caso o HTML tenha tags no meio do nome)
-    // Mas para segurança máxima contra "Fragmento de X", tentamos achar o nome completo primeiro.
-    
-    // Normaliza para facilitar busca
     const lowerHtml = htmlText.toLowerCase();
     const lowerItem = item.toLowerCase();
     
-    // Encontra todas as posições onde o nome do item aparece
     let searchIndex = 0;
     const foundIndices = [];
     while (true) {
@@ -167,38 +148,27 @@ const performScrape = async (item, cookie) => {
         searchIndex = idx + 1;
     }
 
-    // Regex para pegar preço (Generosa, pois já temos o contexto)
-    // Procura > NÚMERO <
     const priceRegex = />\s*([0-9]{1,3}(?:[.,]?[0-9]{3})*)\s*(?:z|Zeny)?\s*</i;
 
     if (foundIndices.length > 0) {
-        // Para cada ocorrência do nome, olha os próximos 1500 caracteres (suficiente para cobrir a linha da tabela)
         for (const idx of foundIndices) {
              const contextChunk = htmlText.substring(idx, idx + 1500);
-             
-             // Aplica a regex no chunk
              const match = contextChunk.match(priceRegex);
              if (match) {
                  const val = parsePriceString(match[1]);
                  if (!isNaN(val)) {
-                     // Filtros de sanidade
-                     if (val >= 2023 && val <= 2030) continue; // Anos
-                     if (val < 500) continue; // Qtd pequena
-                     if (val === 20000000) continue; // Placeholder
-                     
+                     if (val >= 2023 && val <= 2030) continue;
+                     if (val < 500) continue;
+                     if (val === 20000000) continue;
                      prices.push(val);
                  }
              }
         }
     }
 
-    // Se a busca contextual falhou (talvez o nome esteja quebrado por HTML tags <b>Nome</b>),
-    // Tentamos o fallback Global (V2), mas com mais rigor.
     if (prices.length === 0) {
-        // Regex V2 (Solta Global)
         const loosePriceRegex = />\s*([0-9]{1,3}(?:[.,]?[0-9]{3})*)\s*(?:z|Zeny)?\s*</gi;
         const matches = [...htmlText.matchAll(loosePriceRegex)];
-        
         for (const m of matches) {
             const val = parsePriceString(m[1]);
             if (!isNaN(val)) {
@@ -211,8 +181,7 @@ const performScrape = async (item, cookie) => {
     }
 
     if (prices.length > 0) {
-        const minPrice = Math.min(...prices);
-        return { success: true, price: minPrice };
+        return { success: true, price: Math.min(...prices) };
     }
 
     if (htmlText.includes('não foram encontrados') || htmlText.includes('No results') || htmlText.includes('list-none')) {
@@ -226,15 +195,10 @@ const performScrape = async (item, cookie) => {
   }
 };
 
-// =======================================================
-// ROTAS DE API
-// =======================================================
-
 app.get('/api/db', (req, res) => {
   res.json(GLOBAL_DB);
 });
 
-// POST DB COMPLETO (Usado para adicionar/remover itens)
 app.post('/api/db', (req, res) => {
   try {
     const { items, settings } = req.body;
@@ -242,7 +206,6 @@ app.post('/api/db', (req, res) => {
       return res.status(400).json({ error: 'Formato inválido' });
     }
     
-    // Preserva loadingStart para não quebrar items em andamento
     const newItems = items.map(newItem => {
         const existing = GLOBAL_DB.items.find(i => i.id === newItem.id);
         if (existing && existing._loadingStart) {
@@ -256,12 +219,10 @@ app.post('/api/db', (req, res) => {
     saveDB();
     res.json({ success: true });
   } catch (error) {
-    console.error('Erro ao salvar DB:', error);
     res.status(500).json({ error: 'Erro ao salvar dados' });
   }
 });
 
-// NOVA ROTA: ACK ITEM (Marca como visto sem sobrescrever tudo)
 app.post('/api/ack/:id', (req, res) => {
     const { id } = req.params;
     const item = GLOBAL_DB.items.find(i => i.id === id);
@@ -269,21 +230,18 @@ app.post('/api/ack/:id', (req, res) => {
         item.isAck = true;
         item.hasPriceDrop = false;
         saveDB();
-        console.log(`[API] Item ${item.name} marcado como visto.`);
         res.json({ success: true });
     } else {
         res.status(404).json({ error: 'Item not found' });
     }
 });
 
-// NOVA ROTA: ACK ALL
 app.post('/api/ack-all', (req, res) => {
     GLOBAL_DB.items.forEach(i => {
         i.isAck = true;
         i.hasPriceDrop = false;
     });
     saveDB();
-    console.log(`[API] Todos os itens marcados como visto.`);
     res.json({ success: true });
 });
 
@@ -300,15 +258,13 @@ app.get('/api/health', (req, res) => {
 });
 
 // =======================================================
-// AUTOMATION LOOPS
+// AUTOMATION LOOPS (MELHORADO)
 // =======================================================
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; 
-const LOOP_TICK_MS = 2000; 
+const LOOP_TICK_MS = 2500; 
 
-// Helper para pegar a hora no fuso de Brasília, independente do servidor
 const getBrazilHour = () => {
     const date = new Date();
-    // Força o fuso horário para São Paulo
     const options = { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false };
     const hourString = new Intl.DateTimeFormat('en-US', options).format(date);
     return parseInt(hourString, 10);
@@ -324,8 +280,9 @@ const startWatchdog = () => {
           const isStuck = item._loadingStart ? (now - item._loadingStart > 45000) : true;
           if (isStuck) {
              changed = true;
+             console.log(`[Watchdog] Item ${item.name} destravado.`);
              const { _loadingStart, ...rest } = item; 
-             return { ...rest, status: 'ERRO', message: 'Timeout', nextUpdate: now + 5000 };
+             return { ...rest, status: 'IDLE', nextUpdate: now + 5000 };
           }
        }
        return item;
@@ -335,11 +292,12 @@ const startWatchdog = () => {
 };
 
 const processItem = async (item, workerName) => {
-  console.log(`[${workerName}] Verificando: ${item.name}`);
+  // Marca IMEDIATAMENTE como loading para evitar que outro worker pegue
   item.status = 'LOADING';
   item._loadingStart = Date.now();
   saveDB(); 
 
+  console.log(`[${workerName}] Verificando: ${item.name}`);
   const result = await performScrape(item.name, GLOBAL_DB.settings.cookie);
   
   const newPrice = result.price;
@@ -347,15 +305,9 @@ const processItem = async (item, workerName) => {
   const isSuccess = result.success;
 
   const isDeal = isSuccess && newPrice !== null && newPrice > 0 && newPrice <= item.targetPrice;
-  // Se oldPrice era null, consideramos que AGORA sabemos o preço, mas só notificamos se for Deal.
-  // wasDeal previne spam se o preço se mantiver baixo.
   const wasDeal = oldPrice !== null && oldPrice > 0 && oldPrice <= item.targetPrice;
-  
   const isPriceDrop = isSuccess && newPrice !== null && oldPrice !== null && newPrice > 0 && oldPrice > 0 && newPrice < oldPrice;
 
-  // Só reseta o ACK se: 
-  // 1. O preço caiu mais ainda (isPriceDrop)
-  // 2. OU se virou um Deal agora e não era antes (ex: usuário mudou alvo ou preço caiu abaixo do alvo)
   const shouldResetAck = isPriceDrop || (isDeal && !wasDeal);
 
   delete item._loadingStart;
@@ -363,9 +315,10 @@ const processItem = async (item, workerName) => {
   item.lastUpdated = new Date().toISOString();
   item.status = isSuccess ? (newPrice === 0 ? 'ALERTA' : 'OK') : 'ERRO';
   item.message = result.error ? `[${workerName}] ${result.error}` : undefined;
+  
+  // Define o próximo update. Se falhou, tenta de novo em 1 min. Se ok, usa o intervalo padrão.
   item.nextUpdate = isSuccess ? (Date.now() + UPDATE_INTERVAL_MS) : (Date.now() + 60000);
   
-  // IMPORTANTE: Só alteramos isAck para FALSE. Nunca para TRUE aqui.
   if (shouldResetAck) {
      item.isAck = false;
      if (isPriceDrop) item.hasPriceDrop = true;
@@ -376,41 +329,32 @@ const processItem = async (item, workerName) => {
 };
 
 const startAutomationLoop = () => {
-  console.log("🚀 Automação de Background Iniciada");
+  console.log("🚀 Automação Inteligente de Background Iniciada");
   startWatchdog();
   
-  setInterval(async () => {
+  const workerAction = async (workerName) => {
     if (!GLOBAL_DB.settings?.isRunning) return;
-    
-    // FIX: Usa hora do Brasil, não do servidor (UTC)
     const h = getBrazilHour();
-    
-    // Só pausa se ignoreNightPause for falso
     if (!GLOBAL_DB.settings.ignoreNightPause && h >= 1 && h < 8) return;
 
     const now = Date.now();
-    const candidates = GLOBAL_DB.items.filter(i => i.nextUpdate <= now && i.status !== 'LOADING');
+    
+    // FILA POR PRIORIDADE: Ordena itens que precisam de update pelo mais atrasado
+    const candidates = GLOBAL_DB.items
+      .filter(i => i.status !== 'LOADING' && i.nextUpdate <= now)
+      .sort((a, b) => (a.nextUpdate || 0) - (b.nextUpdate || 0));
+
     if (candidates.length > 0) {
-      await processItem(candidates[0], "TOP");
+      // Pega o item mais "atrasado" da fila
+      await processItem(candidates[0], workerName);
     }
-  }, LOOP_TICK_MS);
+  };
 
+  // Dois workers com offset para não baterem no mesmo segundo
+  setInterval(() => workerAction("W1"), LOOP_TICK_MS);
   setTimeout(() => {
-    setInterval(async () => {
-      if (!GLOBAL_DB.settings?.isRunning) return;
-      
-      // FIX: Usa hora do Brasil, não do servidor (UTC)
-      const h = getBrazilHour();
-      // Só pausa se ignoreNightPause for falso
-      if (!GLOBAL_DB.settings.ignoreNightPause && h >= 1 && h < 8) return;
-
-      const now = Date.now();
-      const candidates = GLOBAL_DB.items.filter(i => i.nextUpdate <= now && i.status !== 'LOADING');
-      if (candidates.length > 0) {
-        await processItem(candidates[candidates.length - 1], "BOT");
-      }
-    }, LOOP_TICK_MS);
-  }, 1000); 
+    setInterval(() => workerAction("W2"), LOOP_TICK_MS);
+  }, LOOP_TICK_MS / 2);
 };
 
 startAutomationLoop();

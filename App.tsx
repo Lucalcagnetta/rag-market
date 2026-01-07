@@ -39,7 +39,45 @@ const App: React.FC = () => {
   const [calcPrice, setCalcPrice] = useState(() => localStorage.getItem('ro_calc_price') || '0,85');
   const [calcQty, setCalcQty] = useState('1');
   const [calcTotal, setCalcTotal] = useState('');
-  const isCalculatingRef = useRef(false);
+
+  // Lógica de cálculo sincronizada via handlers para evitar loops de useEffect
+  const calculateTotal = (price: string, qty: string) => {
+    const p = parseFloat(price.replace(',', '.'));
+    const q = parseFloat(qty.replace(',', '.'));
+    if (!isNaN(p) && !isNaN(q)) {
+      return (p * q).toFixed(2).replace('.', ',');
+    }
+    return '';
+  };
+
+  const handlePriceChange = (val: string) => {
+    setCalcPrice(val);
+    localStorage.setItem('ro_calc_price', val);
+    const newTotal = calculateTotal(val, calcQty);
+    if (newTotal) setCalcTotal(newTotal);
+  };
+
+  const handleQtyChange = (val: string) => {
+    setCalcQty(val);
+    const newTotal = calculateTotal(calcPrice, val);
+    if (newTotal) setCalcTotal(newTotal);
+  };
+
+  const handleTotalChange = (val: string) => {
+    setCalcTotal(val); // Permite digitar livremente (ex: "12,")
+    const p = parseFloat(calcPrice.replace(',', '.'));
+    const t = parseFloat(val.replace(',', '.'));
+    if (!isNaN(p) && p > 0 && !isNaN(t)) {
+      setCalcQty(Math.floor(t / p).toString());
+    }
+  };
+
+  // Inicializa o total na primeira carga
+  useEffect(() => {
+    if (dataLoaded && calcTotal === '') {
+      setCalcTotal(calculateTotal(calcPrice, calcQty));
+    }
+  }, [dataLoaded, calcPrice, calcQty, calcTotal]);
 
   const [isAddExpanded, setIsAddExpanded] = useState(false);
   const [tempSettings, setTempSettings] = useState<Settings>(settings);
@@ -53,32 +91,6 @@ const App: React.FC = () => {
   const previousItemsRef = useRef<Item[]>([]); 
   const pendingAcksRef = useRef<Set<string>>(new Set());
   const initialFetchDone = useRef(false);
-
-  // --- LÓGICA DA CALCULADORA ---
-  useEffect(() => {
-    if (isCalculatingRef.current) return;
-    isCalculatingRef.current = true;
-    const p = parseFloat(calcPrice.replace(',', '.'));
-    const q = parseFloat(calcQty.replace(',', '.'));
-    if (!isNaN(p) && !isNaN(q)) {
-      const total = (p * q).toFixed(2).replace('.', ',');
-      setCalcTotal(total);
-      localStorage.setItem('ro_calc_price', calcPrice);
-    }
-    isCalculatingRef.current = false;
-  }, [calcPrice, calcQty]);
-
-  const handleTotalChange = (val: string) => {
-    setCalcTotal(val);
-    if (isCalculatingRef.current) return;
-    isCalculatingRef.current = true;
-    const p = parseFloat(calcPrice.replace(',', '.'));
-    const t = parseFloat(val.replace(',', '.'));
-    if (!isNaN(p) && p > 0 && !isNaN(t)) {
-      setCalcQty(Math.floor(t / p).toString());
-    }
-    isCalculatingRef.current = false;
-  };
 
   const initAudio = useCallback(() => {
     try {
@@ -180,12 +192,10 @@ const App: React.FC = () => {
             const isDeal = newItem.lastPrice && newItem.lastPrice > 0 && newItem.lastPrice <= newItem.targetPrice;
             const isCompAlert = newItem.isUserPrice && newItem.lastPrice !== null && newItem.lastPrice !== newItem.userKnownPrice;
             
-            // Lógica de som ativada em qualquer mudança de preço durante o alerta
             const justAlerted = (oldItem && oldItem.isAck !== false && newItem.isAck === false);
             const priceChanged = oldItem && oldItem.lastPrice !== null && newItem.lastPrice !== null && oldItem.lastPrice !== newItem.lastPrice;
 
             if (justAlerted || priceChanged) {
-                // Prioridade para o som de competição se o item estiver marcado como "meu"
                 if (isCompAlert) playSound('competition');
                 else if (isDeal) playSound('deal');
                 else if (newItem.hasPriceDrop) playSound('drop');
@@ -274,11 +284,9 @@ const App: React.FC = () => {
     initAudio();
     const newList = items.map(i => {
       if (i.id === id) {
-        // Se já está marcado como "meu preço", removemos a marcação totalmente
         if (i.isUserPrice) {
           return { ...i, isUserPrice: false, userKnownPrice: null, isAck: true, hasPriceDrop: false };
         }
-        // Caso contrário, marcamos como "meu preço" usando o valor atual do mercado
         return { ...i, isUserPrice: true, userKnownPrice: i.lastPrice, isAck: true };
       }
       return i;
@@ -434,14 +442,14 @@ const App: React.FC = () => {
                 <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider text-center">Preço (KK)</span>
                 <div className="flex items-center bg-slate-950/50 rounded px-2 py-0.5 w-24 border border-slate-800 focus-within:border-slate-600 transition-colors">
                    <span className="text-[10px] text-emerald-600 mr-1">$</span>
-                   <input className="w-full bg-transparent text-xs font-mono text-emerald-100 focus:outline-none" placeholder="0,00" value={calcPrice} onChange={e => setCalcPrice(e.target.value)} />
+                   <input className="w-full bg-transparent text-xs font-mono text-emerald-100 focus:outline-none" placeholder="0,00" value={calcPrice} onChange={e => handlePriceChange(e.target.value)} />
                 </div>
              </div>
              <span className="text-slate-600 pb-3">×</span>
              <div className="flex flex-col px-1">
                 <span className="text-[8px] text-slate-500 font-bold uppercase tracking-wider text-center">Qtd</span>
                 <div className="flex items-center bg-slate-950/50 rounded px-2 py-0.5 w-20 border border-slate-800 focus-within:border-slate-600 transition-colors">
-                   <input className="w-full bg-transparent text-xs font-mono text-blue-100 focus:outline-none text-center" placeholder="1" value={calcQty} onChange={e => setCalcQty(e.target.value)} />
+                   <input className="w-full bg-transparent text-xs font-mono text-blue-100 focus:outline-none text-center" placeholder="1" value={calcQty} onChange={e => handleQtyChange(e.target.value)} />
                 </div>
              </div>
              <span className="text-slate-600 pb-3">=</span>
