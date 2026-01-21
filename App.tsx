@@ -24,7 +24,7 @@ import {
   BarChart3
 } from 'lucide-react';
 
-const SYNC_INTERVAL_MS = 5000; // AUMENTADO: De 2000 para 5000 para economizar banda da Droplet
+const SYNC_INTERVAL_MS = 10000; // OTIMIZADO: 10s reduz o consumo de banda de saída pela metade
 
 const App: React.FC = () => {
   const [items, setItems] = useState<Item[]>(MOCK_ITEMS);

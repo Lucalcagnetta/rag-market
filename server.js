@@ -247,7 +247,7 @@ app.get('/api/health', (req, res) => {
 });
 
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; 
-const LOOP_TICK_MS = 1200; // REDUZIDO: De 2500 para 1200 para processar 130+ itens mais rápido
+const LOOP_TICK_MS = 1800; // MEIO-TERMO: De 1200 para 1800 para economizar Inbound
 const HISTORY_LIMIT = 30; 
 
 const getBrazilHour = () => {
@@ -341,7 +341,6 @@ const startAutomationLoop = () => {
     }
   };
 
-  // Mantendo 2 workers para maior vazão
   setInterval(() => workerAction("W1"), LOOP_TICK_MS);
   setTimeout(() => {
     setInterval(() => workerAction("W2"), LOOP_TICK_MS);
