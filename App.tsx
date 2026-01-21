@@ -536,14 +536,14 @@ const App: React.FC = () => {
                       <div className="w-full md:w-auto flex items-center justify-center md:justify-end relative min-h-[50px]">
                           {/* Botões de Alerta na Esquerda (Posição dinâmica) */}
                           <div className="absolute left-0 md:static md:mr-6 flex gap-1">
+                              {/* Botão de Confirmar (Check): Aparece primeiro para segurança contra cliques acidentais */}
+                              {isCompAlert && (
+                                  <button onClick={() => confirmNewUserPrice(item.id)} className="p-2 text-blue-400 hover:bg-blue-400/10 rounded-full transition-all" title="Confirmar meu novo preço"><Check size={22}/></button>
+                              )}
+                              
                               {/* Botão de Visto (Olho): Só aparece se não estiver Ack */}
                               {((isDeal || item.hasPriceDrop || isCompAlert) && !isAck) && (
                                   <button onClick={() => acknowledgeItem(item.id)} className={`p-2 rounded-full transition-all ${isCompAlert ? 'text-rose-500 hover:bg-rose-500/10' : 'text-emerald-500 hover:bg-emerald-500/10'}`} title="Marcar como Visto"><Eye size={22}/></button>
-                              )}
-                              
-                              {/* Botão de Confirmar (Check): Aparece sempre que houver divergência de preço, mesmo se já clicou no olho */}
-                              {isCompAlert && (
-                                  <button onClick={() => confirmNewUserPrice(item.id)} className="p-2 text-blue-400 hover:bg-blue-400/10 rounded-full transition-all" title="Confirmar meu novo preço"><Check size={22}/></button>
                               )}
                           </div>
                           
