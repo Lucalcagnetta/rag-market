@@ -247,8 +247,8 @@ app.get('/api/health', (req, res) => {
 });
 
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; 
-const LOOP_TICK_MS = 2500; 
-const HISTORY_LIMIT = 30; // Limite de registros para manter performance com 130+ itens
+const LOOP_TICK_MS = 1200; // REDUZIDO: De 2500 para 1200 para processar 130+ itens mais rápido
+const HISTORY_LIMIT = 30; 
 
 const getBrazilHour = () => {
     const date = new Date();
@@ -296,7 +296,7 @@ const processItem = async (item, workerName) => {
 
   const shouldResetAck = isPriceDrop || (isDeal && !wasDeal);
 
-  // --- Lógica de Histórico Rotativo (Apenas se o preço MUDAR) ---
+  // --- Lógica de Histórico Inteligente (Apenas se o preço MUDAR) ---
   if (isSuccess && newPrice !== null && newPrice > 0 && newPrice !== oldPrice) {
     if (!item.history) item.history = [];
     item.history.push({ price: newPrice, timestamp: new Date().toISOString() });
@@ -341,6 +341,7 @@ const startAutomationLoop = () => {
     }
   };
 
+  // Mantendo 2 workers para maior vazão
   setInterval(() => workerAction("W1"), LOOP_TICK_MS);
   setTimeout(() => {
     setInterval(() => workerAction("W2"), LOOP_TICK_MS);

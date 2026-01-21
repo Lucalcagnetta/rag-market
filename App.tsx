@@ -534,6 +534,7 @@ const App: React.FC = () => {
                       </div>
 
                       <div className="w-full md:w-auto flex items-center justify-center md:justify-end relative min-h-[50px]">
+                          {/* Botões de Alerta na Esquerda (Posição fixa) */}
                           <div className="absolute left-0 md:static md:mr-6 flex gap-2">
                               {((isDeal || item.hasPriceDrop || isCompAlert) && !isAck) && (
                                    <div className="flex gap-1">
