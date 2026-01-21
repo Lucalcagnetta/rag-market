@@ -20,7 +20,8 @@ import {
   ThumbsUp,
   Check,
   AlertTriangle,
-  Filter
+  Filter,
+  BarChart3
 } from 'lucide-react';
 
 const SYNC_INTERVAL_MS = 2000;
@@ -35,12 +36,10 @@ const App: React.FC = () => {
     return saved !== null ? parseFloat(saved) : 0.5;
   });
 
-  // --- CALCULADORA ---
   const [calcPrice, setCalcPrice] = useState(() => localStorage.getItem('ro_calc_price') || '0,85');
   const [calcQty, setCalcQty] = useState('1');
   const [calcTotal, setCalcTotal] = useState('');
 
-  // Lógica de cálculo sincronizada via handlers para evitar loops de useEffect
   const calculateTotal = (price: string, qty: string) => {
     const p = parseFloat(price.replace(',', '.'));
     const q = parseFloat(qty.replace(',', '.'));
@@ -64,7 +63,7 @@ const App: React.FC = () => {
   };
 
   const handleTotalChange = (val: string) => {
-    setCalcTotal(val); // Permite digitar livremente (ex: "12,")
+    setCalcTotal(val);
     const p = parseFloat(calcPrice.replace(',', '.'));
     const t = parseFloat(val.replace(',', '.'));
     if (!isNaN(p) && p > 0 && !isNaN(t)) {
@@ -72,7 +71,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Inicializa o total na primeira carga
   useEffect(() => {
     if (dataLoaded && calcTotal === '') {
       setCalcTotal(calculateTotal(calcPrice, calcQty));
@@ -193,6 +191,7 @@ const App: React.FC = () => {
             const isCompAlert = newItem.isUserPrice && newItem.lastPrice !== null && newItem.lastPrice !== newItem.userKnownPrice;
             
             const justAlerted = (oldItem && oldItem.isAck !== false && newItem.isAck === false);
+            // Fix: Replace missing oldPrice variable with oldItem.lastPrice
             const priceChanged = oldItem && oldItem.lastPrice !== null && newItem.lastPrice !== null && oldItem.lastPrice !== newItem.lastPrice;
 
             if (justAlerted || priceChanged) {
@@ -245,12 +244,18 @@ const App: React.FC = () => {
     if (val >= 1000) return floorValue(val / 1000, 1).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + 'k';
     return val.toLocaleString('pt-BR'); 
   };
+
+  const calculateAverage = (history?: { price: number }[]) => {
+    if (!history || history.length === 0) return null;
+    const sum = history.reduce((acc, curr) => acc + curr.price, 0);
+    return Math.floor(sum / history.length);
+  };
   
   const addNewItem = () => {
     initAudio();
     if (!newItemName.trim()) return;
     const target = parseKkInput(newItemTarget) || 1000000;
-    const newItem: Item = { id: Date.now().toString(), name: newItemName.trim(), targetPrice: target, lastPrice: null, lastUpdated: null, status: Status.IDLE, nextUpdate: 0, isAck: false, hasPriceDrop: false, isPinned: false, isUserPrice: false, userKnownPrice: null };
+    const newItem: Item = { id: Date.now().toString(), name: newItemName.trim(), targetPrice: target, lastPrice: null, lastUpdated: null, status: Status.IDLE, nextUpdate: 0, isAck: false, hasPriceDrop: false, isPinned: false, isUserPrice: false, userKnownPrice: null, history: [] };
     const newList = [...items, newItem];
     setItems(newList);
     saveData(newList, settings);
@@ -507,6 +512,8 @@ const App: React.FC = () => {
                  const isDeal = item.lastPrice && item.lastPrice > 0 && item.lastPrice <= item.targetPrice;
                  const isCompAlert = item.isUserPrice && item.lastPrice !== null && item.lastPrice !== item.userKnownPrice && !isDeal;
                  const isAck = item.isAck;
+                 const avgPrice = calculateAverage(item.history);
+                 const historyCount = item.history?.length || 0;
 
                  let bgClass = "bg-[#161b22]";
                  if (isDeal) bgClass = !isAck ? "animate-pulse-green bg-emerald-900/20 border-l-4 border-emerald-500" : "bg-emerald-900/10 border-l-4 border-emerald-700";
@@ -537,6 +544,14 @@ const App: React.FC = () => {
                               <div className="text-center w-24">
                                  <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1 opacity-50">Alvo</div>
                                  <div className="font-mono text-xs text-slate-400">{formatMoney(item.targetPrice)}</div>
+                              </div>
+                              <div className="h-8 w-px bg-slate-700/50"></div>
+                              <div className="text-center w-24">
+                                 <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1 opacity-50 flex items-center justify-center gap-1">Média <BarChart3 size={10}/></div>
+                                 <div className="font-mono text-xs text-slate-300 flex flex-col">
+                                    {formatMoney(avgPrice)}
+                                    <span className="text-[8px] text-slate-600 font-bold">{historyCount} pts</span>
+                                 </div>
                               </div>
                               <div className="h-8 w-px bg-slate-700/50"></div>
                               <div className="text-center w-28">

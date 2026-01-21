@@ -12,16 +12,13 @@ const app = express();
 const PORT = 3001;
 const HOST = '0.0.0.0';
 
-// Configuração do Banco de Dados JSON
 const DATA_DIR = join(__dirname, 'data');
 const DB_FILE = join(DATA_DIR, 'db.json');
 
-// Garante que a pasta de dados existe
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR);
 }
 
-// Inicializa o DB se não existir
 if (!fs.existsSync(DB_FILE)) {
   fs.writeFileSync(DB_FILE, JSON.stringify({ 
     items: [], 
@@ -35,15 +32,12 @@ if (!fs.existsSync(DB_FILE)) {
   }));
 }
 
-// --- STATE MANAGEMENT (IN-MEMORY with FLUSH) ---
 let GLOBAL_DB = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
 
-// Garante que ignoreNightPause existe se vier de um DB antigo
 if (typeof GLOBAL_DB.settings.ignoreNightPause === 'undefined') {
   GLOBAL_DB.settings.ignoreNightPause = false;
 }
 
-// Função para persistir no disco
 const saveDB = () => {
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(GLOBAL_DB, null, 2));
@@ -52,7 +46,6 @@ const saveDB = () => {
   }
 };
 
-// --- LIMPEZA DE INICIALIZAÇÃO ---
 const cleanStartupData = () => {
   let changed = false;
   GLOBAL_DB.items = GLOBAL_DB.items.map(item => {
@@ -86,10 +79,6 @@ const distPath = join(__dirname, 'dist');
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
 }
-
-// =======================================================
-// LÓGICA DE SCRAPING (CORE)
-// =======================================================
 
 const parsePriceString = (str) => {
   if (!str) return NaN;
@@ -257,11 +246,9 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'online', time: new Date().toISOString() });
 });
 
-// =======================================================
-// AUTOMATION LOOPS (MELHORADO)
-// =======================================================
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; 
 const LOOP_TICK_MS = 2500; 
+const HISTORY_LIMIT = 30; // Limite de registros para manter performance com 130+ itens
 
 const getBrazilHour = () => {
     const date = new Date();
@@ -292,7 +279,6 @@ const startWatchdog = () => {
 };
 
 const processItem = async (item, workerName) => {
-  // Marca IMEDIATAMENTE como loading para evitar que outro worker pegue
   item.status = 'LOADING';
   item._loadingStart = Date.now();
   saveDB(); 
@@ -310,13 +296,21 @@ const processItem = async (item, workerName) => {
 
   const shouldResetAck = isPriceDrop || (isDeal && !wasDeal);
 
+  // --- Lógica de Histórico Rotativo ---
+  if (isSuccess && newPrice !== null && newPrice > 0) {
+    if (!item.history) item.history = [];
+    item.history.push({ price: newPrice, timestamp: new Date().toISOString() });
+    if (item.history.length > HISTORY_LIMIT) {
+      item.history.shift();
+    }
+  }
+
   delete item._loadingStart;
   item.lastPrice = newPrice;
   item.lastUpdated = new Date().toISOString();
   item.status = isSuccess ? (newPrice === 0 ? 'ALERTA' : 'OK') : 'ERRO';
   item.message = result.error ? `[${workerName}] ${result.error}` : undefined;
   
-  // Define o próximo update. Se falhou, tenta de novo em 1 min. Se ok, usa o intervalo padrão.
   item.nextUpdate = isSuccess ? (Date.now() + UPDATE_INTERVAL_MS) : (Date.now() + 60000);
   
   if (shouldResetAck) {
@@ -338,19 +332,15 @@ const startAutomationLoop = () => {
     if (!GLOBAL_DB.settings.ignoreNightPause && h >= 1 && h < 8) return;
 
     const now = Date.now();
-    
-    // FILA POR PRIORIDADE: Ordena itens que precisam de update pelo mais atrasado
     const candidates = GLOBAL_DB.items
       .filter(i => i.status !== 'LOADING' && i.nextUpdate <= now)
       .sort((a, b) => (a.nextUpdate || 0) - (b.nextUpdate || 0));
 
     if (candidates.length > 0) {
-      // Pega o item mais "atrasado" da fila
       await processItem(candidates[0], workerName);
     }
   };
 
-  // Dois workers com offset para não baterem no mesmo segundo
   setInterval(() => workerAction("W1"), LOOP_TICK_MS);
   setTimeout(() => {
     setInterval(() => workerAction("W2"), LOOP_TICK_MS);

@@ -7,6 +7,11 @@ export enum Status {
   ERRO = 'ERRO',
 }
 
+export interface PriceHistory {
+  price: number;
+  timestamp: string;
+}
+
 export interface Item {
   id: string;
   name: string;
@@ -19,8 +24,9 @@ export interface Item {
   isAck?: boolean;
   hasPriceDrop?: boolean;
   isPinned?: boolean;
-  isUserPrice?: boolean;      // Se o usuário marcou o preço como dele
-  userKnownPrice?: number | null; // O preço que o usuário marcou como dele
+  isUserPrice?: boolean;      
+  userKnownPrice?: number | null; 
+  history?: PriceHistory[]; // Novo campo para rastreamento de média
 }
 
 export interface Settings {
