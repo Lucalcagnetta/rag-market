@@ -191,7 +191,6 @@ const App: React.FC = () => {
             const isCompAlert = newItem.isUserPrice && newItem.lastPrice !== null && newItem.lastPrice !== newItem.userKnownPrice;
             
             const justAlerted = (oldItem && oldItem.isAck !== false && newItem.isAck === false);
-            // Fix: Replace missing oldPrice variable with oldItem.lastPrice
             const priceChanged = oldItem && oldItem.lastPrice !== null && newItem.lastPrice !== null && oldItem.lastPrice !== newItem.lastPrice;
 
             if (justAlerted || priceChanged) {
@@ -537,7 +536,12 @@ const App: React.FC = () => {
                       <div className="w-full md:w-auto flex items-center justify-center md:justify-end relative min-h-[50px]">
                           <div className="absolute left-0 md:static md:mr-6 flex gap-2">
                               {((isDeal || item.hasPriceDrop || isCompAlert) && !isAck) && (
-                                   <button onClick={() => acknowledgeItem(item.id)} className={`p-2 rounded-full transition-all ${isCompAlert ? 'text-rose-500 hover:bg-rose-500/10' : 'text-emerald-500 hover:bg-emerald-500/10'}`} title="Marcar como Visto"><Eye size={22}/></button>
+                                   <div className="flex gap-1">
+                                      <button onClick={() => acknowledgeItem(item.id)} className={`p-2 rounded-full transition-all ${isCompAlert ? 'text-rose-500 hover:bg-rose-500/10' : 'text-emerald-500 hover:bg-emerald-500/10'}`} title="Marcar como Visto"><Eye size={22}/></button>
+                                      {isCompAlert && (
+                                         <button onClick={() => confirmNewUserPrice(item.id)} className="p-2 text-blue-400 hover:bg-blue-400/10 rounded-full transition-all" title="Confirmar meu novo preço"><Check size={22}/></button>
+                                      )}
+                                   </div>
                               )}
                           </div>
                           <div className="flex items-center justify-center gap-6">
@@ -562,9 +566,6 @@ const App: React.FC = () => {
                       </div>
 
                       <div className="flex gap-2 w-full md:w-auto justify-center md:ml-4 border-t border-slate-800 md:border-0 pt-2 md:pt-0">
-                         {isCompAlert && (
-                            <button onClick={() => confirmNewUserPrice(item.id)} className="p-2 text-blue-400 animate-pulse bg-blue-400/10 rounded-lg border border-blue-400/30 transition-all hover:bg-blue-400/20" title="Confirmar meu novo preço"><Check size={20}/></button>
-                         )}
                          <button title={item.isUserPrice ? "Remover minha marcação" : "Marcar como meu preço"} onClick={() => toggleUserPrice(item.id)} className={`p-2 transition-all active:scale-90 ${item.isUserPrice ? (isCompAlert ? 'text-rose-500' : 'text-blue-400') : 'text-slate-500 hover:text-blue-300'}`}><ThumbsUp size={18} className={item.isUserPrice ? (isCompAlert ? "fill-rose-500" : "fill-blue-400") : ""} /></button>
                          <button title="Fixar no Topo" onClick={() => togglePin(item.id)} className={`p-2 transition-all active:scale-90 ${item.isPinned ? 'text-blue-500' : 'text-slate-500 hover:text-blue-400'}`}><Pin size={18} className={item.isPinned ? "fill-blue-500" : ""} /></button>
                          <button title="Forçar Busca" onClick={() => resetItem(item.id)} className="text-slate-500 hover:text-emerald-400 p-2 transition-all"><RefreshCw size={18}/></button>

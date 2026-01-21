@@ -296,8 +296,8 @@ const processItem = async (item, workerName) => {
 
   const shouldResetAck = isPriceDrop || (isDeal && !wasDeal);
 
-  // --- Lógica de Histórico Rotativo ---
-  if (isSuccess && newPrice !== null && newPrice > 0) {
+  // --- Lógica de Histórico Rotativo (Apenas se o preço MUDAR) ---
+  if (isSuccess && newPrice !== null && newPrice > 0 && newPrice !== oldPrice) {
     if (!item.history) item.history = [];
     item.history.push({ price: newPrice, timestamp: new Date().toISOString() });
     if (item.history.length > HISTORY_LIMIT) {
