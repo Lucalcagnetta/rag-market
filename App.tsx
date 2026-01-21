@@ -516,7 +516,7 @@ const App: React.FC = () => {
 
                  let bgClass = "bg-[#161b22]";
                  if (isDeal) bgClass = !isAck ? "animate-pulse-green bg-emerald-900/20 border-l-4 border-emerald-500" : "bg-emerald-900/10 border-l-4 border-emerald-700";
-                 else if (isCompAlert) bgClass = "animate-pulse-red bg-rose-900/20 border-l-4 border-rose-500";
+                 else if (isCompAlert) bgClass = !isAck ? "animate-pulse-red bg-rose-900/20 border-l-4 border-rose-500" : "bg-rose-900/10 border-l-4 border-rose-800/50";
                  else if (!isAck && item.hasPriceDrop) bgClass = "animate-pulse-blue bg-blue-900/20 border-l-4 border-blue-500";
 
                  return (
@@ -534,17 +534,19 @@ const App: React.FC = () => {
                       </div>
 
                       <div className="w-full md:w-auto flex items-center justify-center md:justify-end relative min-h-[50px]">
-                          {/* Botões de Alerta na Esquerda (Posição fixa) */}
-                          <div className="absolute left-0 md:static md:mr-6 flex gap-2">
+                          {/* Botões de Alerta na Esquerda (Posição dinâmica) */}
+                          <div className="absolute left-0 md:static md:mr-6 flex gap-1">
+                              {/* Botão de Visto (Olho): Só aparece se não estiver Ack */}
                               {((isDeal || item.hasPriceDrop || isCompAlert) && !isAck) && (
-                                   <div className="flex gap-1">
-                                      <button onClick={() => acknowledgeItem(item.id)} className={`p-2 rounded-full transition-all ${isCompAlert ? 'text-rose-500 hover:bg-rose-500/10' : 'text-emerald-500 hover:bg-emerald-500/10'}`} title="Marcar como Visto"><Eye size={22}/></button>
-                                      {isCompAlert && (
-                                         <button onClick={() => confirmNewUserPrice(item.id)} className="p-2 text-blue-400 hover:bg-blue-400/10 rounded-full transition-all" title="Confirmar meu novo preço"><Check size={22}/></button>
-                                      )}
-                                   </div>
+                                  <button onClick={() => acknowledgeItem(item.id)} className={`p-2 rounded-full transition-all ${isCompAlert ? 'text-rose-500 hover:bg-rose-500/10' : 'text-emerald-500 hover:bg-emerald-500/10'}`} title="Marcar como Visto"><Eye size={22}/></button>
+                              )}
+                              
+                              {/* Botão de Confirmar (Check): Aparece sempre que houver divergência de preço, mesmo se já clicou no olho */}
+                              {isCompAlert && (
+                                  <button onClick={() => confirmNewUserPrice(item.id)} className="p-2 text-blue-400 hover:bg-blue-400/10 rounded-full transition-all" title="Confirmar meu novo preço"><Check size={22}/></button>
                               )}
                           </div>
+                          
                           <div className="flex items-center justify-center gap-6">
                               <div className="text-center w-24">
                                  <div className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1 opacity-50">Alvo</div>
