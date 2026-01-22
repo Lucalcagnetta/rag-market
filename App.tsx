@@ -24,7 +24,7 @@ import {
   BarChart3
 } from 'lucide-react';
 
-const SYNC_INTERVAL_MS = 10000; // OTIMIZADO: 10s reduz o consumo de banda de saída pela metade
+const SYNC_INTERVAL_MS = 10000; 
 
 const App: React.FC = () => {
   const [items, setItems] = useState<Item[]>(MOCK_ITEMS);
@@ -87,8 +87,9 @@ const App: React.FC = () => {
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const previousItemsRef = useRef<Item[]>([]); 
-  const pendingAcksRef = useRef<Set<string>>(new Set());
-  const pendingUserPricesRef = useRef<Map<string, number>>(new Map()); // PROTEÇÃO: Rastreia confirmações pendentes
+  
+  // PROTEÇÃO ROBUSTA: Armazena o estado desejado pelo usuário até que o servidor confirme
+  const pendingSyncRef = useRef<Map<string, Partial<Item>>>(new Map());
   const initialFetchDone = useRef(false);
 
   const initAudio = useCallback(() => {
@@ -154,31 +155,23 @@ const App: React.FC = () => {
           const data = await res.json();
           if (!editingItem) {
              const mergedItems = (data.items || []).map((serverItem: Item) => {
-                 let updatedItem = { ...serverItem };
-                 
-                 // PROTEÇÃO 1: Preservar "Visto" pendente
-                 if (pendingAcksRef.current.has(serverItem.id)) {
-                     if (serverItem.isAck) {
-                         pendingAcksRef.current.delete(serverItem.id);
-                     } else {
-                         updatedItem.isAck = true;
-                         updatedItem.hasPriceDrop = false;
-                     }
+                 const pending = pendingSyncRef.current.get(serverItem.id);
+                 if (!pending) return serverItem;
+
+                 // Verificar se o servidor já "alcançou" o estado que queríamos
+                 const matches = Object.keys(pending).every(key => 
+                    (serverItem as any)[key] === (pending as any)[key]
+                 );
+
+                 if (matches) {
+                    pendingSyncRef.current.delete(serverItem.id);
+                    return serverItem;
                  }
 
-                 // PROTEÇÃO 2: Preservar "Confirmação de Preço" pendente
-                 const pendingPrice = pendingUserPricesRef.current.get(serverItem.id);
-                 if (pendingPrice !== undefined) {
-                     if (serverItem.userKnownPrice === pendingPrice) {
-                         pendingUserPricesRef.current.delete(serverItem.id);
-                     } else {
-                         updatedItem.userKnownPrice = pendingPrice;
-                         updatedItem.isAck = true;
-                     }
-                 }
-
-                 return updatedItem;
+                 // Se ainda não alcançou, forçamos os campos pendentes sobre o dado do servidor
+                 return { ...serverItem, ...pending };
              });
+             
              setItems(mergedItems);
              setSettings(data.settings || INITIAL_SETTINGS);
              if (!dataLoaded) { 
@@ -202,9 +195,10 @@ const App: React.FC = () => {
     
     items.forEach(newItem => {
         const oldItem = prevItems.find(p => p.id === newItem.id);
-        const isPendingAck = pendingAcksRef.current.has(newItem.id);
+        const hasPending = pendingSyncRef.current.has(newItem.id);
         
-        if (!newItem.isAck && !isPendingAck) {
+        // Só toca som se não houver alteração pendente (evita som ao clicar em botões)
+        if (!newItem.isAck && !hasPending) {
             const isDeal = newItem.lastPrice && newItem.lastPrice > 0 && newItem.lastPrice <= newItem.targetPrice;
             const isCompAlert = newItem.isUserPrice && newItem.lastPrice !== null && newItem.lastPrice !== newItem.userKnownPrice;
             
@@ -304,53 +298,61 @@ const App: React.FC = () => {
 
   const toggleUserPrice = (id: string) => {
     initAudio();
+    let pendingFields: Partial<Item> = {};
+
     const newList = items.map(i => {
       if (i.id === id) {
         if (i.isUserPrice) {
-          return { ...i, isUserPrice: false, userKnownPrice: null, isAck: true, hasPriceDrop: false };
+          pendingFields = { isUserPrice: false, userKnownPrice: null, isAck: true, hasPriceDrop: false };
+        } else {
+          pendingFields = { isUserPrice: true, userKnownPrice: i.lastPrice, isAck: true, hasPriceDrop: false };
         }
-        return { ...i, isUserPrice: true, userKnownPrice: i.lastPrice, isAck: true };
+        pendingSyncRef.current.set(id, pendingFields);
+        return { ...i, ...pendingFields };
       }
       return i;
     });
+
     setItems(newList);
     saveData(newList, settings);
   };
 
   const confirmNewUserPrice = (id: string) => {
     initAudio();
-    let priceToConfirm = 0;
+    let pendingFields: Partial<Item> = {};
+
     const newList = items.map(i => {
       if (i.id === id && i.lastPrice !== null) {
-        priceToConfirm = i.lastPrice;
-        return { ...i, userKnownPrice: i.lastPrice, isAck: true, hasPriceDrop: false };
+        pendingFields = { userKnownPrice: i.lastPrice, isAck: true, hasPriceDrop: false };
+        pendingSyncRef.current.set(id, pendingFields);
+        return { ...i, ...pendingFields };
       }
       return i;
     });
     
-    if (priceToConfirm > 0) {
-      pendingUserPricesRef.current.set(id, priceToConfirm);
-    }
-    
     setItems(newList);
     saveData(newList, settings);
-    pendingAcksRef.current.add(id);
     fetch(`/api/ack/${id}`, { method: 'POST' }).catch(console.error);
   };
 
   const acknowledgeAll = async () => {
     if (activeAlertsCount === 0) return;
     if (confirm("Marcar tudo como visto?")) {
-      items.forEach(i => pendingAcksRef.current.add(i.id));
-      const newList = items.map(i => ({ ...i, isAck: true, hasPriceDrop: false }));
+      const newList = items.map(i => {
+         const pending = { isAck: true, hasPriceDrop: false };
+         pendingSyncRef.current.set(i.id, pending);
+         return { ...i, ...pending };
+      });
       setItems(newList);
       try { await fetch('/api/ack-all', { method: 'POST' }); } catch (e) { console.error(e); }
     }
   };
   
   const acknowledgeItem = async (id: string) => {
-      pendingAcksRef.current.add(id);
-      const newList = items.map(i => i.id === id ? { ...i, isAck: true, hasPriceDrop: false } : i);
+      const pending = { isAck: true, hasPriceDrop: false };
+      pendingSyncRef.current.set(id, pending);
+      
+      const newList = items.map(i => i.id === id ? { ...i, ...pending } : i);
       setItems(newList);
       try { await fetch(`/api/ack/${id}`, { method: 'POST' }); } catch (e) { console.error(e); }
   };
