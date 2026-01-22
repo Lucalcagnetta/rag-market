@@ -88,6 +88,7 @@ const App: React.FC = () => {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const previousItemsRef = useRef<Item[]>([]); 
   const pendingAcksRef = useRef<Set<string>>(new Set());
+  const pendingUserPricesRef = useRef<Map<string, number>>(new Map()); // PROTEÇÃO: Rastreia confirmações pendentes
   const initialFetchDone = useRef(false);
 
   const initAudio = useCallback(() => {
@@ -153,13 +154,30 @@ const App: React.FC = () => {
           const data = await res.json();
           if (!editingItem) {
              const mergedItems = (data.items || []).map((serverItem: Item) => {
+                 let updatedItem = { ...serverItem };
+                 
+                 // PROTEÇÃO 1: Preservar "Visto" pendente
                  if (pendingAcksRef.current.has(serverItem.id)) {
                      if (serverItem.isAck) {
                          pendingAcksRef.current.delete(serverItem.id);
-                         return serverItem;
-                     } else return { ...serverItem, isAck: true, hasPriceDrop: false };
+                     } else {
+                         updatedItem.isAck = true;
+                         updatedItem.hasPriceDrop = false;
+                     }
                  }
-                 return serverItem;
+
+                 // PROTEÇÃO 2: Preservar "Confirmação de Preço" pendente
+                 const pendingPrice = pendingUserPricesRef.current.get(serverItem.id);
+                 if (pendingPrice !== undefined) {
+                     if (serverItem.userKnownPrice === pendingPrice) {
+                         pendingUserPricesRef.current.delete(serverItem.id);
+                     } else {
+                         updatedItem.userKnownPrice = pendingPrice;
+                         updatedItem.isAck = true;
+                     }
+                 }
+
+                 return updatedItem;
              });
              setItems(mergedItems);
              setSettings(data.settings || INITIAL_SETTINGS);
@@ -301,12 +319,19 @@ const App: React.FC = () => {
 
   const confirmNewUserPrice = (id: string) => {
     initAudio();
+    let priceToConfirm = 0;
     const newList = items.map(i => {
       if (i.id === id && i.lastPrice !== null) {
+        priceToConfirm = i.lastPrice;
         return { ...i, userKnownPrice: i.lastPrice, isAck: true, hasPriceDrop: false };
       }
       return i;
     });
+    
+    if (priceToConfirm > 0) {
+      pendingUserPricesRef.current.set(id, priceToConfirm);
+    }
+    
     setItems(newList);
     saveData(newList, settings);
     pendingAcksRef.current.add(id);
