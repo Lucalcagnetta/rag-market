@@ -40,9 +40,11 @@ if (typeof GLOBAL_DB.settings.ignoreNightPause === 'undefined') {
 
 const saveDB = () => {
   try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(GLOBAL_DB, null, 2));
+    // Usamos Sync para garantir que o processo só continue após o dado estar seguro no disco
+    fs.writeFileSync(DB_FILE, JSON.stringify(GLOBAL_DB, null, 2), 'utf8');
+    console.log("✅ DB persistido em disco com sucesso.");
   } catch (e) {
-    console.error("Erro ao salvar DB em disco:", e);
+    console.error("❌ Erro FATAL ao salvar DB em disco:", e);
   }
 };
 
@@ -66,7 +68,7 @@ const cleanStartupData = () => {
 cleanStartupData();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '5mb' })); // Limite aumentado para DBs maiores
 
 app.use((req, res, next) => {
   if (req.url !== '/api/health' && req.url !== '/api/db') { 
@@ -195,6 +197,7 @@ app.post('/api/db', (req, res) => {
       return res.status(400).json({ error: 'Formato inválido' });
     }
     
+    // Merge para não perder timers internos do servidor
     const newItems = items.map(newItem => {
         const existing = GLOBAL_DB.items.find(i => i.id === newItem.id);
         if (existing && existing._loadingStart) {
@@ -205,9 +208,11 @@ app.post('/api/db', (req, res) => {
 
     GLOBAL_DB.items = newItems;
     GLOBAL_DB.settings = settings;
-    saveDB();
+    
+    saveDB(); // Persistência imediata
     res.json({ success: true });
   } catch (error) {
+    console.error("Erro no processamento do POST /api/db:", error);
     res.status(500).json({ error: 'Erro ao salvar dados' });
   }
 });
@@ -247,7 +252,7 @@ app.get('/api/health', (req, res) => {
 });
 
 const UPDATE_INTERVAL_MS = 2 * 60 * 1000; 
-const LOOP_TICK_MS = 1800; // MEIO-TERMO: De 1200 para 1800 para economizar Inbound
+const LOOP_TICK_MS = 1800; 
 const HISTORY_LIMIT = 30; 
 
 const getBrazilHour = () => {
@@ -296,7 +301,6 @@ const processItem = async (item, workerName) => {
 
   const shouldResetAck = isPriceDrop || (isDeal && !wasDeal);
 
-  // --- Lógica de Histórico Inteligente (Apenas se o preço MUDAR) ---
   if (isSuccess && newPrice !== null && newPrice > 0 && newPrice !== oldPrice) {
     if (!item.history) item.history = [];
     item.history.push({ price: newPrice, timestamp: new Date().toISOString() });

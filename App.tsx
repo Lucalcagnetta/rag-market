@@ -21,7 +21,8 @@ import {
   Check,
   AlertTriangle,
   Filter,
-  BarChart3
+  BarChart3,
+  CloudLine
 } from 'lucide-react';
 
 const SYNC_INTERVAL_MS = 10000; 
@@ -31,6 +32,8 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<Settings>(INITIAL_SETTINGS);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [filterRedAlerts, setFilterRedAlerts] = useState(false);
+  const [isCloudSaving, setIsCloudSaving] = useState(false); // UI state para feedback
+  
   const [volume, setVolume] = useState<number>(() => {
     const saved = localStorage.getItem('ro_volume');
     return saved !== null ? parseFloat(saved) : 0.5;
@@ -88,8 +91,11 @@ const App: React.FC = () => {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const previousItemsRef = useRef<Item[]>([]); 
   
-  // PROTEÇÃO ROBUSTA: Armazena o estado desejado pelo usuário até que o servidor confirme
+  // PROTEÇÃO CONTRA SOBRESCRITA:
+  // pendingSyncRef protege campos específicos (visto, preço do usuário)
+  // isSavingRef protege a LISTA inteira (adição/remoção)
   const pendingSyncRef = useRef<Map<string, Partial<Item>>>(new Map());
+  const isSavingRef = useRef<boolean>(false);
   const initialFetchDone = useRef(false);
 
   const initAudio = useCallback(() => {
@@ -138,27 +144,41 @@ const App: React.FC = () => {
   }, [initAudio, volume]);
 
   const saveData = useCallback(async (currentItems: Item[], currentSettings: Settings) => {
+    isSavingRef.current = true;
+    setIsCloudSaving(true);
     try {
-      await fetch('/api/db', {
+      const res = await fetch('/api/db', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: currentItems, settings: currentSettings })
       });
-    } catch (err) { console.error("Failed to save", err); }
+      if (!res.ok) throw new Error("Server storage failed");
+    } catch (err) { 
+      console.error("❌ CLOUD SAVE ERROR:", err); 
+    } finally {
+      // Pequeno delay para garantir que o server terminou o processamento antes de liberar o fetch
+      setTimeout(() => {
+        isSavingRef.current = false;
+        setIsCloudSaving(false);
+      }, 1000);
+    }
   }, []);
 
   useEffect(() => {
     const fetchData = async () => {
+      // Se estiver salvando agora, ignora o fetch para não clobberar a UI
+      if (isSavingRef.current) return;
+
       try {
         const res = await fetch('/api/db');
         if (res.ok) {
           const data = await res.json();
-          if (!editingItem) {
+          // Bloqueia update se estiver editando ou se o server enviou dados vazios (bug prevention)
+          if (!editingItem && data.items) {
              const mergedItems = (data.items || []).map((serverItem: Item) => {
                  const pending = pendingSyncRef.current.get(serverItem.id);
                  if (!pending) return serverItem;
 
-                 // Verificar se o servidor já "alcançou" o estado que queríamos
                  const matches = Object.keys(pending).every(key => 
                     (serverItem as any)[key] === (pending as any)[key]
                  );
@@ -167,8 +187,6 @@ const App: React.FC = () => {
                     pendingSyncRef.current.delete(serverItem.id);
                     return serverItem;
                  }
-
-                 // Se ainda não alcançou, forçamos os campos pendentes sobre o dado do servidor
                  return { ...serverItem, ...pending };
              });
              
@@ -197,7 +215,6 @@ const App: React.FC = () => {
         const oldItem = prevItems.find(p => p.id === newItem.id);
         const hasPending = pendingSyncRef.current.has(newItem.id);
         
-        // Só toca som se não houver alteração pendente (evita som ao clicar em botões)
         if (!newItem.isAck && !hasPending) {
             const isDeal = newItem.lastPrice && newItem.lastPrice > 0 && newItem.lastPrice <= newItem.targetPrice;
             const isCompAlert = newItem.isUserPrice && newItem.lastPrice !== null && newItem.lastPrice !== newItem.userKnownPrice;
@@ -466,6 +483,12 @@ const App: React.FC = () => {
                 <span className="hidden md:inline uppercase tracking-tighter">{filterRedAlerts ? 'Ver Geral' : 'Aba Vermelha'}</span>
                 <span className={`px-1.5 rounded text-[10px] font-bold ${filterRedAlerts ? 'bg-white text-rose-600' : (redAlertsTotal > 0 ? 'bg-rose-500 text-white' : 'bg-slate-700 text-slate-500')}`}>{redAlertsTotal}</span>
              </button>
+             
+             {isCloudSaving && (
+               <div className="flex items-center gap-1 text-[10px] font-bold text-blue-400 animate-pulse ml-2">
+                 <RefreshCw size={12} className="animate-spin" /> SALVANDO...
+               </div>
+             )}
           </div>
           
           <div className="hidden lg:flex items-center gap-1 bg-slate-900/50 border border-slate-800 p-1.5 rounded-lg shadow-inner">
